@@ -6,6 +6,7 @@
 - Global prefix: `/api`
 
 Full endpoint: `POST /api/cnt/:alias`
+Internal stats endpoint: `POST|GET /api/internal/stats/query`
 
 ---
 
@@ -14,6 +15,83 @@ Full endpoint: `POST /api/cnt/:alias`
 ### `POST /api/cnt/:alias`
 
 Track 1 lượt truy cập cho một alias link.
+
+### `POST|GET /api/internal/stats/query`
+
+API nội bộ để Laravel lấy dữ liệu dashboard/statistics trực tiếp từ tracking DB.
+
+Headers (bắt buộc 1 trong 2):
+
+- `X-Internal-Token: {INTERNAL_STATS_API_TOKEN}`
+- `Authorization: Bearer {INTERNAL_STATS_API_TOKEN}`
+
+`POST`: truyền filter trong JSON body.  
+`GET`: truyền filter qua query params với tên key tương tự.
+
+Body (JSON):
+
+```json
+{
+  "dateFrom": "2026-04-01",
+  "dateTo": "2026-04-21",
+  "userId": 456,
+  "linkId": 123,
+  "country": "US",
+  "device": 2,
+  "isEarn": 1,
+  "groupBy": "day_link",
+  "limit": 200
+}
+```
+
+Field notes:
+
+- `dateFrom`, `dateTo`: bắt buộc, định dạng `YYYY-MM-DD`, timezone UTC
+- `userId`, `linkId`: optional filter
+- `country`: optional, regex `^[a-zA-Z]{2,10}$`
+- `device`: optional (`1=mobile`, `2=desktop`, `3=tablet`)
+- `isEarn`: optional (`0` hoặc `1`)
+- `groupBy`: optional
+  - `day`, `link`, `user`, `day_link`, `day_user`, `link_user`, `day_link_user`
+- `limit`: optional, mặc định `500`, max `5000`
+
+Response mẫu:
+
+```json
+{
+  "meta": {
+    "timezone": "UTC",
+    "dateFrom": "2026-04-01",
+    "dateTo": "2026-04-21",
+    "groupBy": "day_link",
+    "limit": 200,
+    "filters": {
+      "userId": 456,
+      "linkId": 123,
+      "country": "US",
+      "device": 2,
+      "isEarn": 1
+    },
+    "generatedAt": "2026-04-21T05:20:10.000Z"
+  },
+  "summary": {
+    "views": 120,
+    "earnViews": 85,
+    "revenue": 0.2145,
+    "uniqueLinks": 1,
+    "uniqueUsers": 1
+  },
+  "rows": [
+    {
+      "day": "2026-04-20",
+      "linkId": 123,
+      "views": 18,
+      "earnViews": 14,
+      "revenue": 0.032
+    }
+  ]
+}
+```
 
 ### Path params
 
@@ -88,7 +166,7 @@ HTTP status luôn `200 OK` ở flow nghiệp vụ tracking (kể cả reject log
 ## 3) Business Logic
 
 1. Validate alias format.
-2. Load link by alias (đang dùng mock `getLinkByAlias`).
+2. Load link by alias qua `GET {DETAIL_LINK_ENDPOINT}` (replace `{alias}`).
 3. Reject nếu link không tồn tại hoặc `status != 1`.
 4. Dedupe Redis theo ngày:
    - Key: `visit:{alias}:{ip}:{YYYYMMDD}`
@@ -110,10 +188,14 @@ HTTP status luôn `200 OK` ở flow nghiệp vụ tracking (kể cả reject log
    - `isEarn = isFirstVisit ? 1 : 0`
    - không earn => `revenue = 0`
 10. Realtime Redis stats:
-   - `HINCRBY stat:minute:{YYYYMMDDHHmm} link:{id}:views 1`
-   - `HINCRBYFLOAT stat:minute:{YYYYMMDDHHmm} user:{id}:revenue {revenue}`
+
+- `HINCRBY stat:minute:{YYYYMMDDHHmm} link:{id}:views 1`
+- `HINCRBYFLOAT stat:minute:{YYYYMMDDHHmm} link:{id}:revenue {revenue}`
+- `HINCRBYFLOAT stat:minute:{YYYYMMDDHHmm} user:{id}:revenue {revenue}`
+
 11. Push queue log:
-   - `LPUSH logs_queue {json}`
+
+- `LPUSH logs_queue {json}`
 
 ---
 
@@ -170,7 +252,7 @@ HTTP status luôn `200 OK` ở flow nghiệp vụ tracking (kể cả reject log
 
 ```json
 {
-  "links": [{ "link_id": 123, "views": 100 }],
+  "links": [{ "link_id": 123, "views": 100, "revenue": 0.12 }],
   "users": [{ "user_id": 456, "revenue": 0.5 }],
   "minute_keys": ["202604031540"],
   "generated_at": "2026-04-03T15:41:00.000Z"
@@ -184,14 +266,13 @@ HTTP status luôn `200 OK` ở flow nghiệp vụ tracking (kể cả reject log
 
 ---
 
-## 6) Mock Alias Data (Current)
+## 6) Link Detail Lookup
 
-Trong `TrackingService.getLinkByAlias`:
+Service gọi endpoint:
 
-- `demo` -> active link
-- `paused` -> inactive link
+- `GET {DETAIL_LINK_ENDPOINT}` (ví dụ: `http://localhost:8000/api/stu/{alias}/details`)
 
-Ví dụ active mock:
+Payload hợp lệ tối thiểu:
 
 ```json
 {
@@ -209,6 +290,8 @@ Ví dụ active mock:
   }
 }
 ```
+
+Service có normalize để chấp nhận một số wrapper phổ biến (`data`, `result`, `link`, `detail`).
 
 ---
 
@@ -231,7 +314,7 @@ Ví dụ active mock:
 ### Accepted case
 
 ```bash
-curl -X POST 'http://localhost:3000/api/cnt/demo' \
+curl -X POST 'http://localhost:3000/api/cnt/your-alias' \
   -H 'Content-Type: application/json' \
   -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36' \
   -H 'X-Forwarded-For: 8.8.8.8' \
@@ -246,7 +329,39 @@ curl -X POST 'http://localhost:3000/api/cnt/@@@' -H 'Content-Type: application/j
 
 ---
 
-## 9) Environment Keys
+## 9) Demo Dataset
+
+Seed file:
+
+- `docs/sql/20260421_seed_demo_data.sql`
+
+Import:
+
+```bash
+mysql -u root -p tracking < docs/sql/20260421_seed_demo_data.sql
+```
+
+Expected seeded rows:
+
+- `access_logs`: 24 rows
+- `access_logs_daily`: 8 rows
+- `user_agents`: 4 rows
+
+Quick query test for internal stats API:
+
+```bash
+curl -X POST 'http://localhost:3000/api/internal/stats/query' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Internal-Token: change-me' \
+  -d '{
+    "dateFrom":"2026-04-18",
+    "dateTo":"2026-04-21",
+    "groupBy":"day_link_user",
+    "limit":200
+  }'
+```
+
+## 10) Environment Keys
 
 - `PORT`
 - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SYNC`, `DB_LOGGING`, `DB_POOL_SIZE`
@@ -254,4 +369,7 @@ curl -X POST 'http://localhost:3000/api/cnt/@@@' -H 'Content-Type: application/j
 - `LOGS_QUEUE_KEY`
 - `VISIT_DEDUPE_TTL_SECONDS`
 - `LARAVEL_STATS_ENDPOINT`
+- `DETAIL_LINK_ENDPOINT`
+- `INTERNAL_STATS_API_TOKEN`
+- `STATS_QUERY_MAX_DAYS`
 - `HTTP_TIMEOUT_MS`

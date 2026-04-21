@@ -46,4 +46,32 @@ export class HttpService {
       lastError ?? new Error(`HTTP POST failed after ${maxRetries} attempts`)
     );
   }
+
+  async getWithRetry<TResponse>(
+    url: string,
+    maxRetries = 3,
+  ): Promise<TResponse> {
+    let attempt = 0;
+    let lastError: Error | undefined;
+
+    while (attempt < maxRetries) {
+      attempt += 1;
+      try {
+        const response = await this.client.get<TResponse>(url);
+        return response.data;
+      } catch (error) {
+        lastError = error as AxiosError;
+        this.logger.warn(
+          `HTTP GET failed (attempt ${attempt}/${maxRetries}) for ${url}: ${lastError.message}`,
+        );
+
+        if (attempt < maxRetries) {
+          const waitMs = 100 * 2 ** attempt;
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
+      }
+    }
+
+    throw lastError ?? new Error(`HTTP GET failed after ${maxRetries} attempts`);
+  }
 }

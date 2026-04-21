@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { type ChainableCommander } from 'ioredis';
+import { HttpService } from '../../http/http.service';
 import { RedisService } from '../../redis/redis.service';
 import {
   DEVICE_CODE,
@@ -27,9 +28,11 @@ export class TrackingService {
   private readonly logger = new Logger(TrackingService.name);
   private readonly logsQueueKey: string;
   private readonly dedupeTtlSeconds: number;
+  private readonly detailLinkEndpoint: string;
 
   constructor(
     private readonly configService: ConfigService,
+    private readonly httpService: HttpService,
     private readonly redisService: RedisService,
     private readonly trackingRepository: TrackingRepository,
   ) {
@@ -41,6 +44,9 @@ export class TrackingService {
       'VISIT_DEDUPE_TTL_SECONDS',
       86400,
     );
+    this.detailLinkEndpoint = (
+      this.configService.get<string>('DETAIL_LINK_ENDPOINT', '') || ''
+    ).trim();
   }
 
   async trackVisit(
@@ -82,7 +88,7 @@ export class TrackingService {
       };
     }
 
-    const link = this.getLinkByAlias(cleanAlias);
+    const link = await this.getLinkByAlias(cleanAlias);
 
     if (!link) {
       // await this.enqueueLog({
@@ -105,7 +111,8 @@ export class TrackingService {
       };
     }
 
-    if (link.status !== 1) { // link is not active
+    if (link.status !== 1) {
+      // link is not active
       await this.enqueueLog({
         link_id: link.link_id,
         user_id: link.user_id,
@@ -139,10 +146,31 @@ export class TrackingService {
     let revenue = isFirstVisit ? rate / 1000 : 0;
     let isEarn = isFirstVisit ? 1 : 0;
 
+    if (isFirstVisit) {
+      try {
+        const existedToday =
+          await this.trackingRepository.existsTodayInDailyLogs(
+            link.link_id,
+            normalizedIp,
+            now,
+          );
+
+        if (existedToday) {
+          revenue = 0;
+          isEarn = 0;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed daily exists-check for link ${link.link_id}: ${(error as Error).message}`,
+        );
+      }
+    }
+
     const fakePercent = 7 + link.tier.bonus;
     const roll = Math.floor(Math.random() * 10000) + 1;
 
-    if (roll <= fakePercent * 100) { // treat as fake view
+    if (roll <= fakePercent * 100) {
+      // treat as fake view
       revenue = 0;
       isEarn = 0;
 
@@ -210,39 +238,31 @@ export class TrackingService {
     };
   }
 
-  getLinkByAlias(alias: string): LinkData | null {
-    const mockRecord: Record<string, LinkData> = {
-      demo: {
-        link_id: 123,
-        user_id: 456,
-        level_id: 2,
-        status: 1,
-        rate: {
-          mobile: 0.5,
-          desktop: 1.2,
-        },
-        tier: {
-          id: 2,
-          bonus: 3,
-        },
-      },
-      paused: {
-        link_id: 124,
-        user_id: 456,
-        level_id: 2,
-        status: 0,
-        rate: {
-          mobile: 0.5,
-          desktop: 1.2,
-        },
-        tier: {
-          id: 2,
-          bonus: 3,
-        },
-      },
-    };
+  async getLinkByAlias(alias: string): Promise<LinkData | null> {
+    if (!this.detailLinkEndpoint) {
+      this.logger.error('DETAIL_LINK_ENDPOINT is empty');
+      return null;
+    }
 
-    return mockRecord[alias] ?? null;
+    const requestUrl = this.buildDetailLinkUrl(alias);
+
+    try {
+      const response = await this.httpService.getWithRetry<unknown>(requestUrl);
+      const link = this.normalizeDetailPayload(response);
+
+      if (!link) {
+        this.logger.warn(
+          `Invalid link detail payload for alias ${alias} from ${requestUrl}`,
+        );
+      }
+
+      return link;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to load link detail for alias ${alias}: ${(error as Error).message}`,
+      );
+      return null;
+    }
   }
 
   private updateRealtimeStats(
@@ -254,6 +274,7 @@ export class TrackingService {
   ): void {
     const redisMinuteKey = `stat:minute:${minuteKey}`;
     pipeline.hincrby(redisMinuteKey, `link:${linkId}:views`, 1);
+    pipeline.hincrbyfloat(redisMinuteKey, `link:${linkId}:revenue`, revenue);
     pipeline.hincrbyfloat(redisMinuteKey, `user:${userId}:revenue`, revenue);
   }
 
@@ -299,5 +320,110 @@ export class TrackingService {
     }
 
     return trimmed.replace(/^::ffff:/, '').slice(0, 45);
+  }
+
+  private buildDetailLinkUrl(alias: string): string {
+    const encodedAlias = encodeURIComponent(alias);
+    return this.detailLinkEndpoint.replace(/\{alias\}/g, encodedAlias);
+  }
+
+  private normalizeDetailPayload(payload: unknown): LinkData | null {
+    const direct = this.normalizeLinkData(payload);
+    if (direct) {
+      return direct;
+    }
+
+    if (!this.isRecord(payload)) {
+      return null;
+    }
+
+    const topLevelKeys = ['data', 'result', 'link', 'detail'];
+    for (const key of topLevelKeys) {
+      const nested = this.normalizeLinkData(payload[key]);
+      if (nested) {
+        return nested;
+      }
+
+      if (!this.isRecord(payload[key])) {
+        continue;
+      }
+
+      for (const secondLevelKey of topLevelKeys) {
+        const deepNested = this.normalizeLinkData(payload[key][secondLevelKey]);
+        if (deepNested) {
+          return deepNested;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private normalizeLinkData(value: unknown): LinkData | null {
+    if (!this.isRecord(value)) {
+      return null;
+    }
+
+    const rate = value.rate;
+    const tier = value.tier;
+    if (!this.isRecord(rate) || !this.isRecord(tier)) {
+      return null;
+    }
+
+    const linkId = this.toNumber(value.link_id);
+    const userId = this.toNumber(value.user_id);
+    const levelId = this.toNumber(value.level_id);
+    const status = this.toNumber(value.status);
+    const mobileRate = this.toNumber(rate.mobile);
+    const desktopRate = this.toNumber(rate.desktop);
+    const tierId = this.toNumber(tier.id);
+    const tierBonus = this.toNumber(tier.bonus);
+
+    if (
+      linkId === null ||
+      userId === null ||
+      levelId === null ||
+      status === null ||
+      mobileRate === null ||
+      desktopRate === null ||
+      tierId === null ||
+      tierBonus === null
+    ) {
+      return null;
+    }
+
+    return {
+      link_id: linkId,
+      user_id: userId,
+      level_id: levelId,
+      status,
+      rate: {
+        mobile: mobileRate,
+        desktop: desktopRate,
+      },
+      tier: {
+        id: tierId,
+        bonus: tierBonus,
+      },
+    };
+  }
+
+  private toNumber(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string' && value.trim()) {
+      const casted = Number(value);
+      if (Number.isFinite(casted)) {
+        return casted;
+      }
+    }
+
+    return null;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
   }
 }

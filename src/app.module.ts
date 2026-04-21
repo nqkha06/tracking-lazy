@@ -7,6 +7,7 @@ import { DatabaseModule } from './database/database.module';
 import { HttpModule } from './http/http.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
 import { RedisModule } from './redis/redis.module';
+import { UaParserService } from './ua-parser/ua-parser.service';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { RedisModule } from './redis/redis.module';
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
+    UaParserService,
   ],
 })
 export class AppModule {}

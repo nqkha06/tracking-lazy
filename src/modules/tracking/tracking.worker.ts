@@ -9,7 +9,7 @@ import { TrackingRepository } from './tracking.repository';
 import { AccessLogQueuePayload } from './tracking.types';
 
 interface LaravelStatsPayload {
-  links: Array<{ link_id: number; views: number }>;
+  links: Array<{ link_id: number; views: number; revenue: number }>;
   users: Array<{ user_id: number; revenue: number }>;
   minute_keys: string[];
   generated_at: string;
@@ -20,6 +20,8 @@ export class TrackingWorker {
   private readonly logger = new Logger(TrackingWorker.name);
   private readonly logsQueueKey: string;
   private readonly statsSyncEndpoint: string;
+  private readonly dailyMigrationBatchSize: number;
+  private readonly dailyMigrationMaxBatches: number;
 
   constructor(
     private readonly configService: ConfigService,
@@ -34,6 +36,14 @@ export class TrackingWorker {
     this.statsSyncEndpoint = this.configService.get<string>(
       'LARAVEL_STATS_ENDPOINT',
       'http://localhost:9999/internal/stats/update',
+    );
+    this.dailyMigrationBatchSize = this.configService.get<number>(
+      'DAILY_MIGRATION_BATCH_SIZE',
+      5000,
+    );
+    this.dailyMigrationMaxBatches = this.configService.get<number>(
+      'DAILY_MIGRATION_MAX_BATCHES',
+      20,
     );
   }
 
@@ -54,14 +64,62 @@ export class TrackingWorker {
 
     try {
       await this.withRetry(
-        () => this.trackingRepository.bulkInsertAccessLogs(parsedLogs),
+        () => this.trackingRepository.bulkInsertDailyAccessLogs(parsedLogs),
         3,
       );
     } catch (error) {
       await this.redisService.requeueToTail(this.logsQueueKey, rawLogs);
       this.logger.error(
-        `Failed to insert log batch, returned ${rawLogs.length} rows to Redis queue: ${(error as Error).message}`,
+        `Failed to insert daily log batch, returned ${rawLogs.length} rows to Redis queue: ${(error as Error).message}`,
       );
+    }
+  }
+
+  @Interval(60000)
+  async migrateDailyLogsToMain(): Promise<void> {
+    const lockKey = 'lock:access_logs_daily_migration';
+    const lockToken = randomUUID();
+    const lockAcquired = await this.redisService.acquireLock(
+      lockKey,
+      lockToken,
+      55_000,
+    );
+
+    if (!lockAcquired) {
+      return;
+    }
+
+    try {
+      const beforeDate = this.startOfUtcDay(new Date());
+      let movedTotal = 0;
+
+      for (let i = 0; i < this.dailyMigrationMaxBatches; i += 1) {
+        const movedInBatch = await this.withRetry(
+          () =>
+            this.trackingRepository.migrateDailyLogsToMain(
+              beforeDate,
+              this.dailyMigrationBatchSize,
+            ),
+          3,
+        );
+
+        movedTotal += movedInBatch;
+        if (movedInBatch < this.dailyMigrationBatchSize) {
+          break;
+        }
+      }
+
+      if (movedTotal > 0) {
+        this.logger.log(
+          `Migrated ${movedTotal} rows from access_logs_daily to access_logs`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to migrate daily logs to main table: ${(error as Error).message}`,
+      );
+    } finally {
+      await this.redisService.releaseLock(lockKey, lockToken);
     }
   }
 
@@ -141,6 +199,7 @@ export class TrackingWorker {
     const result = await pipeline.exec();
 
     const linkViews = new Map<number, number>();
+    const linkRevenue = new Map<number, number>();
     const userRevenue = new Map<number, number>();
 
     for (let i = 0; i < keys.length; i += 1) {
@@ -160,6 +219,15 @@ export class TrackingWorker {
           continue;
         }
 
+        if (field.startsWith('link:') && field.endsWith(':revenue')) {
+          const linkId = Number(field.split(':')[1]);
+          const revenue = Number(value || 0);
+          if (Number.isFinite(linkId) && Number.isFinite(revenue)) {
+            linkRevenue.set(linkId, (linkRevenue.get(linkId) || 0) + revenue);
+          }
+          continue;
+        }
+
         if (field.startsWith('user:') && field.endsWith(':revenue')) {
           const userId = Number(field.split(':')[1]);
           const revenue = Number(value || 0);
@@ -174,6 +242,7 @@ export class TrackingWorker {
       links: Array.from(linkViews.entries()).map(([linkId, views]) => ({
         link_id: linkId,
         views,
+        revenue: Number((linkRevenue.get(linkId) || 0).toFixed(6)),
       })),
       users: Array.from(userRevenue.entries()).map(([userId, revenue]) => ({
         user_id: userId,
@@ -184,18 +253,17 @@ export class TrackingWorker {
     };
   }
 
-  private async withRetry(
-    callback: () => Promise<void>,
+  private async withRetry<T>(
+    callback: () => Promise<T>,
     maxRetries: number,
-  ): Promise<void> {
+  ): Promise<T> {
     let attempt = 0;
     let lastError: Error | undefined;
 
     while (attempt < maxRetries) {
       attempt += 1;
       try {
-        await callback();
-        return;
+        return await callback();
       } catch (error) {
         lastError = error as Error;
         if (attempt < maxRetries) {
@@ -205,5 +273,11 @@ export class TrackingWorker {
     }
 
     throw lastError ?? new Error('Unknown error during retry operation');
+  }
+
+  private startOfUtcDay(value: Date): Date {
+    return new Date(
+      Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
+    );
   }
 }
