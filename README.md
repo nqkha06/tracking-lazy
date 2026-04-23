@@ -5,7 +5,7 @@ Production-oriented NestJS tracking backend for a link monetization platform.
 ## Features
 
 - `POST /api/cnt/:alias` high-throughput tracking endpoint
-- `POST|GET /api/internal/stats/query` internal stats endpoint for Laravel dashboards
+- `GET /api/internal/stats/query` internal stats endpoint for Laravel dashboards
 - Redis visit dedupe: `SET visit:{alias}:{ip}:{date} 1 NX EX 86400`
 - Device detection (`mobile`, `desktop`, `tablet`)
 - Revenue calculation inside NestJS (`rate / 1000`)
@@ -103,62 +103,78 @@ Sample response:
 }
 ```
 
-### `POST|GET /api/internal/stats/query`
+### `GET /api/internal/stats/query`
 
 Headers:
 
 - `X-Internal-Token: {INTERNAL_STATS_API_TOKEN}` (or `Authorization: Bearer ...`)
-- `POST`: truyền filter qua JSON body.
-- `GET`: truyền filter qua query-string với key tương tự body.
 
 Sample request:
 
 ```bash
-curl -X POST http://localhost:3000/api/internal/stats/query \
-  -H 'Content-Type: application/json' \
+curl -G 'http://localhost:3000/api/internal/stats/query' \
   -H 'X-Internal-Token: change-me' \
-  -d '{
-    "dateFrom":"2026-04-01",
-    "dateTo":"2026-04-21",
-    "userId":456,
-    "linkId":123,
-    "groupBy":"day_link",
-    "limit":200
-  }'
+  --data-urlencode 'created_at_from=2026-04-01 00:00:00' \
+  --data-urlencode 'created_at_to=2026-04-21 23:59:59' \
+  --data-urlencode 'select=date,link_id,user_agents.browser,views,revenue' \
+  --data-urlencode 'group_fields=date,link_id,user_agents.browser' \
+  --data-urlencode 'where=[["country","IN",["VN","US"]],["device","=",2]]' \
+  --data-urlencode 'order_by=revenue' \
+  --data-urlencode 'order_direction=desc' \
+  --data-urlencode 'limit=200' \
+  --data-urlencode 'page=1'
 ```
 
 Sample response:
 
 ```json
 {
+  "success": true,
+  "code": "STATS_QUERY_OK",
+  "message": "ok",
+  "generated_at": "2026-04-21T05:20:10.000Z",
   "meta": {
     "timezone": "UTC",
-    "dateFrom": "2026-04-01",
-    "dateTo": "2026-04-21",
-    "groupBy": "day_link",
-    "limit": 200,
-    "filters": {
-      "userId": 456,
-      "linkId": 123
+    "mode": "aggregate",
+    "query": {
+      "created_at_from": "2026-04-01 00:00:00",
+      "created_at_to": "2026-04-21 23:59:59",
+      "select": ["date", "link_id", "user_agents.browser", "views", "revenue"],
+      "group_fields": ["date", "link_id", "user_agents.browser"],
+      "order_by": "revenue",
+      "order_direction": "desc",
+      "limit": 200,
+      "page": 1,
+      "conditions": [
+        { "field": "country", "operator": "IN", "value": ["VN", "US"] }
+      ]
     },
-    "generatedAt": "2026-04-21T05:20:10.000Z"
+    "totals": {
+      "row_count": 1,
+      "total_row_count": 37
+    },
+    "pagination": {
+      "page": 1,
+      "per_page": 200,
+      "current_page_items": 1,
+      "total_items": 37,
+      "total_pages": 1,
+      "has_next_page": false,
+      "has_prev_page": false
+    },
+    "generated_at": "2026-04-21T05:20:10.000Z"
   },
-  "summary": {
-    "views": 120,
-    "earnViews": 85,
-    "revenue": 0.2145,
-    "uniqueLinks": 1,
-    "uniqueUsers": 1
-  },
-  "rows": [
-    {
-      "day": "2026-04-20",
-      "linkId": 123,
-      "views": 18,
-      "earnViews": 14,
-      "revenue": 0.032
-    }
-  ]
+  "data": {
+    "rows": [
+      {
+        "date": "2026-04-20",
+        "link_id": 123,
+        "user_agents.browser": "Chrome",
+        "views": 18,
+        "revenue": 0.032
+      }
+    ]
+  }
 }
 ```
 
@@ -239,6 +255,7 @@ REDIS_PASSWORD=
 
 LOGS_QUEUE_KEY=logs_queue
 VISIT_DEDUPE_TTL_SECONDS=86400
+LINK_DETAIL_CACHE_TTL_SECONDS=60
 DAILY_MIGRATION_BATCH_SIZE=5000
 DAILY_MIGRATION_MAX_BATCHES=20
 

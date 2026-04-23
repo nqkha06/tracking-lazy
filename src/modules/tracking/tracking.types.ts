@@ -34,27 +34,97 @@ export interface AccessLogQueuePayload {
 }
 
 export const STATS_GROUP_BY_VALUES = [
-  'day',
+  'date',
   'link',
   'user',
-  'day_link',
-  'day_user',
+  'date_link',
+  'date_user',
+  'date_link_user',
   'link_user',
-  'day_link_user',
 ] as const;
 
 export type StatsGroupBy = (typeof STATS_GROUP_BY_VALUES)[number];
 
+export const STATS_DATA_FIELD_VALUES = [
+  'created_at',
+  'date',
+  'link_id',
+  'user_id',
+  'ip_address',
+  'country',
+  'device',
+  'is_earn',
+  'revenue',
+  'detection_mask',
+  'reject_reason_mask',
+  'user_agents.browser',
+  'user_agents.os',
+  'user_agents.raw',
+] as const;
+
+export type StatsDataField = (typeof STATS_DATA_FIELD_VALUES)[number];
+
+export const STATS_METRIC_FIELD_VALUES = [
+  'views',
+  'revenue',
+  'earn_views',
+  'unique_users',
+  'unique_ips',
+] as const;
+
+export type StatsMetricField = (typeof STATS_METRIC_FIELD_VALUES)[number];
+
+export type StatsSelectableField = StatsDataField | StatsMetricField;
+
+export const STATS_FILTER_FIELD_VALUES = STATS_DATA_FIELD_VALUES;
+export type StatsFilterField = StatsDataField;
+
+export const STATS_FILTER_OPERATOR_VALUES = [
+  '=',
+  '!=',
+  '<>',
+  '>',
+  '>=',
+  '<',
+  '<=',
+  'LIKE',
+  'NOT LIKE',
+  'IN',
+  'NOT IN',
+  'BETWEEN',
+  'NOT BETWEEN',
+] as const;
+
+export type StatsFilterOperator = (typeof STATS_FILTER_OPERATOR_VALUES)[number];
+
+export type StatsFilterValue =
+  | string
+  | number
+  | Array<string | number>
+  | [string | number, string | number];
+
+export interface StatsFilterCondition {
+  field: StatsFilterField;
+  operator: StatsFilterOperator;
+  value: StatsFilterValue;
+}
+
+export const STATS_ORDER_DIRECTION_VALUES = ['asc', 'desc'] as const;
+export type StatsOrderDirection = (typeof STATS_ORDER_DIRECTION_VALUES)[number];
+
+export type StatsOrderBy = StatsSelectableField;
+
 export interface StatsQueryFilterInput {
   startAt: string;
   endExclusive: string;
-  userId?: number;
-  linkId?: number;
-  country?: string;
-  device?: number;
-  isEarn?: 0 | 1;
-  groupBy: StatsGroupBy;
+  selectFields: StatsSelectableField[];
+  groupFields: StatsDataField[];
+  aggregate: boolean;
   limit: number;
+  offset: number;
+  orderBy: StatsOrderBy;
+  orderDirection: StatsOrderDirection;
+  conditions: StatsFilterCondition[];
 }
 
 export interface StatsSummary {
@@ -65,14 +135,7 @@ export interface StatsSummary {
   uniqueUsers: number;
 }
 
-export interface StatsGroupedRow {
-  day?: string;
-  linkId?: number;
-  userId?: number;
-  views: number;
-  earnViews: number;
-  revenue: number;
-}
+export type StatsGroupedRow = Record<string, string | number | null>;
 
 export interface TrackResult {
   ok: boolean;

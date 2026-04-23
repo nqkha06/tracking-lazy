@@ -6,7 +6,7 @@
 - Global prefix: `/api`
 
 Full endpoint: `POST /api/cnt/:alias`
-Internal stats endpoint: `POST|GET /api/internal/stats/query`
+Internal stats endpoint: `GET /api/internal/stats/query`
 
 ---
 
@@ -16,7 +16,7 @@ Internal stats endpoint: `POST|GET /api/internal/stats/query`
 
 Track 1 lượt truy cập cho một alias link.
 
-### `POST|GET /api/internal/stats/query`
+### `GET /api/internal/stats/query`
 
 API nội bộ để Laravel lấy dữ liệu dashboard/statistics trực tiếp từ tracking DB.
 
@@ -25,73 +25,186 @@ Headers (bắt buộc 1 trong 2):
 - `X-Internal-Token: {INTERNAL_STATS_API_TOKEN}`
 - `Authorization: Bearer {INTERNAL_STATS_API_TOKEN}`
 
-`POST`: truyền filter trong JSON body.  
-`GET`: truyền filter qua query params với tên key tương tự.
+Dùng `GET` với query params.
 
-Body (JSON):
+Query params example:
 
 ```json
 {
-  "dateFrom": "2026-04-01",
-  "dateTo": "2026-04-21",
-  "userId": 456,
-  "linkId": 123,
+  "created_at_from": "2026-04-01 00:00:00",
+  "created_at_to": "2026-04-21 23:59:59",
+  "select": ["date", "link_id", "user_agents.browser", "views", "revenue"],
+  "group_fields": ["date", "link_id", "user_agents.browser"],
+  "where": "[[\"created_at\",\">=\",\"2026-04-01 00:00:00\"],[\"created_at\",\"<\",\"2026-04-22 00:00:00\"],[\"country\",\"IN\",[\"US\",\"VN\"]],[\"device\",\"=\",2]]",
   "country": "US",
   "device": 2,
-  "isEarn": 1,
-  "groupBy": "day_link",
-  "limit": 200
+  "is_earn": 1,
+  "order_by": "revenue",
+  "order_direction": "desc",
+  "limit": 200,
+  "page": 1
 }
 ```
 
 Field notes:
 
-- `dateFrom`, `dateTo`: bắt buộc, định dạng `YYYY-MM-DD`, timezone UTC
-- `userId`, `linkId`: optional filter
+- Bắt buộc: `created_at_from`, `created_at_to` (`YYYY-MM-DD` hoặc `YYYY-MM-DD HH:mm:ss`)
+- API có 2 mode:
+  - `raw` (mặc định): không truyền `group_fields/group_by/groups` -> trả record gốc, không tự group theo `date`
+  - `aggregate`: có truyền `group_fields/group_by/groups` -> trả dữ liệu đã group + metrics
+- `select`: danh sách cột cần lấy
+  - data fields: `created_at`, `date`, `link_id`, `user_id`, `ip_address`, `country`, `device`, `is_earn`, `revenue`, `detection_mask`, `reject_reason_mask`, `user_agents.browser`, `user_agents.os`
+  - metric fields: `views`, `revenue`, `earn_views`, `unique_users`, `unique_ips`
+  - Không còn hỗ trợ alias cũ: `day`, `clicks`
+- `group_fields`: danh sách field group (nếu có)
+  - Chỉ khi có `group_fields` thì mới aggregate
+  - Nếu truyền `created_at` trong `group_fields` thì hệ thống tự map thành `date(created_at)` (field `date`)
+  - Trong aggregate mode, field data trong `select` phải nằm trong `group_fields`
+- Raw mode không nhận metric trong `select` (ngoại trừ `revenue` là cột raw của log)
+- Field từ bảng quan hệ phải dùng đúng chuẩn `relation.field` (ví dụ: `user_agents.browser`, `user_agents.os`)
+- `where`: JSON array điều kiện, hỗ trợ tuple `[field, operator, value]` hoặc object
+- Operator hỗ trợ: `=`, `!=`, `<>`, `>`, `>=`, `<`, `<=`, `LIKE`, `NOT LIKE`, `IN`, `NOT IN`, `BETWEEN`, `NOT BETWEEN`
+- `user_id`, `link_id`, `country`, `device`, `is_earn`: shortcut filter
 - `country`: optional, regex `^[a-zA-Z]{2,10}$`
 - `device`: optional (`1=mobile`, `2=desktop`, `3=tablet`)
-- `isEarn`: optional (`0` hoặc `1`)
-- `groupBy`: optional
-  - `day`, `link`, `user`, `day_link`, `day_user`, `link_user`, `day_link_user`
+- `order_by`: field/metric để sort
+- `order_direction`: `asc|desc` (mặc định `asc` nếu không truyền)
 - `limit`: optional, mặc định `500`, max `5000`
+- `page`: optional, mặc định `1`, bắt đầu từ `1`
+
+Examples lấy data nhanh:
+
+```bash
+# 1) Raw logs: chỉ lấy vài cột cần thiết
+curl -G 'http://localhost:3000/api/internal/stats/query' \
+  -H 'X-Internal-Token: change-me' \
+  --data-urlencode 'created_at_from=2026-04-18 00:00:00' \
+  --data-urlencode 'created_at_to=2026-04-21 23:59:59' \
+  --data-urlencode 'select=created_at,link_id,user_id,revenue' \
+  --data-urlencode 'order_by=created_at' \
+  --data-urlencode 'order_direction=desc' \
+  --data-urlencode 'limit=100' \
+  --data-urlencode 'page=1'
+```
+
+```bash
+# 2) Aggregate theo ngày: views + revenue + earn_views
+curl -G 'http://localhost:3000/api/internal/stats/query' \
+  -H 'X-Internal-Token: change-me' \
+  --data-urlencode 'created_at_from=2026-04-01 00:00:00' \
+  --data-urlencode 'created_at_to=2026-04-21 23:59:59' \
+  --data-urlencode 'select=date,views,revenue,earn_views' \
+  --data-urlencode 'group_fields=date' \
+  --data-urlencode 'order_by=date' \
+  --data-urlencode 'order_direction=asc'
+```
+
+```bash
+# 3) Aggregate theo link_id: top link theo revenue
+curl -G 'http://localhost:3000/api/internal/stats/query' \
+  -H 'X-Internal-Token: change-me' \
+  --data-urlencode 'created_at_from=2026-04-01 00:00:00' \
+  --data-urlencode 'created_at_to=2026-04-21 23:59:59' \
+  --data-urlencode 'select=link_id,views,revenue,unique_users' \
+  --data-urlencode 'group_fields=link_id' \
+  --data-urlencode 'order_by=revenue' \
+  --data-urlencode 'order_direction=desc' \
+  --data-urlencode 'limit=50' \
+  --data-urlencode 'page=2'
+```
+
+```bash
+# 4) Aggregate theo user_id + link_id, lọc user cụ thể
+curl -G 'http://localhost:3000/api/internal/stats/query' \
+  -H 'X-Internal-Token: change-me' \
+  --data-urlencode 'created_at_from=2026-04-01 00:00:00' \
+  --data-urlencode 'created_at_to=2026-04-21 23:59:59' \
+  --data-urlencode 'user_id=456' \
+  --data-urlencode 'select=user_id,link_id,views,revenue' \
+  --data-urlencode 'group_fields=user_id,link_id' \
+  --data-urlencode 'order_by=revenue' \
+  --data-urlencode 'order_direction=desc'
+```
+
+```bash
+# 5) Aggregate theo browser (relation field) + country filter
+curl -G 'http://localhost:3000/api/internal/stats/query' \
+  -H 'X-Internal-Token: change-me' \
+  --data-urlencode 'created_at_from=2026-04-01 00:00:00' \
+  --data-urlencode 'created_at_to=2026-04-21 23:59:59' \
+  --data-urlencode 'select=user_agents.browser,views,revenue' \
+  --data-urlencode 'group_fields=user_agents.browser' \
+  --data-urlencode 'where=[["country","IN",["VN","US"]],["user_agents.browser","LIKE","%Chrome%"]]' \
+  --data-urlencode 'order_by=revenue' \
+  --data-urlencode 'order_direction=desc'
+```
 
 Response mẫu:
 
 ```json
 {
+  "success": true,
+  "code": "STATS_QUERY_OK",
+  "message": "ok",
+  "generated_at": "2026-04-21T05:20:10.000Z",
   "meta": {
     "timezone": "UTC",
-    "dateFrom": "2026-04-01",
-    "dateTo": "2026-04-21",
-    "groupBy": "day_link",
-    "limit": 200,
-    "filters": {
-      "userId": 456,
-      "linkId": 123,
-      "country": "US",
-      "device": 2,
-      "isEarn": 1
+    "mode": "aggregate",
+    "query": {
+      "created_at_from": "2026-04-01 00:00:00",
+      "created_at_to": "2026-04-21 23:59:59",
+      "select": ["date", "link_id", "user_agents.browser", "views", "revenue"],
+      "group_fields": ["date", "link_id", "user_agents.browser"],
+      "order_by": "revenue",
+      "order_direction": "desc",
+      "limit": 200,
+      "page": 1,
+      "conditions": [
+        { "field": "country", "operator": "IN", "value": ["US", "VN"] }
+      ]
     },
-    "generatedAt": "2026-04-21T05:20:10.000Z"
+    "fields": {
+      "date_fields": ["created_at", "date"],
+      "filterable_fields": ["created_at", "date", "link_id", "user_id"],
+      "selectable_fields": ["created_at", "date", "link_id", "user_id"],
+      "relation_fields": ["user_agents.browser", "user_agents.os"]
+    },
+    "totals": {
+      "row_count": 1,
+      "total_row_count": 37
+    },
+    "pagination": {
+      "page": 1,
+      "per_page": 200,
+      "current_page_items": 1,
+      "total_items": 37,
+      "total_pages": 1,
+      "has_next_page": false,
+      "has_prev_page": false
+    },
+    "generated_at": "2026-04-21T05:20:10.000Z"
   },
-  "summary": {
-    "views": 120,
-    "earnViews": 85,
-    "revenue": 0.2145,
-    "uniqueLinks": 1,
-    "uniqueUsers": 1
-  },
-  "rows": [
-    {
-      "day": "2026-04-20",
-      "linkId": 123,
-      "views": 18,
-      "earnViews": 14,
-      "revenue": 0.032
-    }
-  ]
+  "data": {
+    "rows": [
+      {
+        "date": "2026-04-20",
+        "link_id": 123,
+        "user_agents.browser": "Chrome",
+        "views": 18,
+        "revenue": 0.032
+      }
+    ]
+  }
 }
 ```
+
+Ghi chú response format:
+
+- Envelope chuẩn production: `success`, `code`, `message`, `generated_at`
+- Payload chính nằm trong `data.rows`
+- Thông tin query/field/tổng row nằm trong `meta`
+- Pagination nằm trong `meta.pagination`
+- Key dùng snake_case để đồng bộ với client backend (Laravel/PHP)
 
 ### Path params
 
@@ -347,19 +460,82 @@ Expected seeded rows:
 - `access_logs_daily`: 8 rows
 - `user_agents`: 4 rows
 
-Quick query test for internal stats API:
+Quick query test for internal stats API (GET only):
+
+Raw mode (không group, trả record gốc):
 
 ```bash
-curl -X POST 'http://localhost:3000/api/internal/stats/query' \
-  -H 'Content-Type: application/json' \
+curl -G 'http://localhost:3000/api/internal/stats/query' \
   -H 'X-Internal-Token: change-me' \
-  -d '{
-    "dateFrom":"2026-04-18",
-    "dateTo":"2026-04-21",
-    "groupBy":"day_link_user",
-    "limit":200
-  }'
+  --data-urlencode 'created_at_from=2026-04-18 00:00:00' \
+  --data-urlencode 'created_at_to=2026-04-21 23:59:59' \
+  --data-urlencode 'select=created_at,link_id,user_id,ip_address,country,device,is_earn,revenue,user_agents.browser,user_agents.os' \
+  --data-urlencode 'where=[["country","IN",["VN","US"]],["device","=",2]]' \
+  --data-urlencode 'order_by=created_at' \
+  --data-urlencode 'order_direction=desc' \
+  --data-urlencode 'limit=200' \
+  --data-urlencode 'page=1'
 ```
+
+Aggregate mode (có group):
+
+```bash
+curl -G 'http://localhost:3000/api/internal/stats/query' \
+  -H 'X-Internal-Token: change-me' \
+  --data-urlencode 'created_at_from=2026-04-18 00:00:00' \
+  --data-urlencode 'created_at_to=2026-04-21 23:59:59' \
+  --data-urlencode 'select=date,link_id,user_agents.browser,views,revenue' \
+  --data-urlencode 'group_fields=date,link_id,user_agents.browser' \
+  --data-urlencode 'where=[["country","IN",["VN","US"]],["device","=",2]]' \
+  --data-urlencode 'order_by=revenue' \
+  --data-urlencode 'order_direction=desc' \
+  --data-urlencode 'limit=200' \
+  --data-urlencode 'page=1'
+```
+
+Form-style params (legacy-compatible) are also supported:
+
+```bash
+curl -G 'http://localhost:3000/api/internal/stats/query' \
+  -H 'X-Internal-Token: change-me' \
+  --data-urlencode 'created_at_from=2026-04-18 00:00:00' \
+  --data-urlencode 'created_at_to=2026-04-21 23:59:59' \
+  --data-urlencode 'groups[]=date' \
+  --data-urlencode 'groups[]=link_id' \
+  --data-urlencode 'order_by=revenue' \
+  --data-urlencode 'order_direction=desc' \
+  --data-urlencode 'limit=100' \
+  --data-urlencode 'page=1' \
+  --data-urlencode 'filters=[["country","=","VN"],["user_agents.browser","LIKE","%Chrome%"]]'
+```
+
+Supported query aliases:
+
+- `created_at_from` / `created_at_to`
+- `user_id` / `link_id` (or camelCase `userId` / `linkId`)
+- `select` (comma list hoặc lặp param)
+- `group_fields` (comma list hoặc lặp param)
+- `order_by`, `order_direction`
+- `limit`, `page`
+- `where` hoặc `filters` JSON array với shape `[field, operator, value]`
+
+Supported data fields (`where`/`group_fields`/`select`):
+
+- `created_at`, `date`, `link_id`, `user_id`, `ip_address`, `country`, `revenue`
+- `device`, `is_earn`, `detection_mask`, `reject_reason_mask`, `user_agents.browser`, `user_agents.os`
+
+Supported metric fields (`select`/`order_by`):
+
+- `views`, `revenue`, `earn_views`, `unique_users`, `unique_ips`
+
+Supported operators:
+
+- `=`, `!=`, `<>`, `>`, `>=`, `<`, `<=`, `LIKE`, `NOT LIKE`
+- `IN`, `NOT IN`, `BETWEEN`, `NOT BETWEEN`
+
+Notes:
+
+- Fields quan hệ phải dùng dạng `relation.field`: `user_agents.browser`, `user_agents.os`.
 
 ## 10) Environment Keys
 
@@ -368,6 +544,7 @@ curl -X POST 'http://localhost:3000/api/internal/stats/query' \
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD`
 - `LOGS_QUEUE_KEY`
 - `VISIT_DEDUPE_TTL_SECONDS`
+- `LINK_DETAIL_CACHE_TTL_SECONDS`
 - `LARAVEL_STATS_ENDPOINT`
 - `DETAIL_LINK_ENDPOINT`
 - `INTERNAL_STATS_API_TOKEN`

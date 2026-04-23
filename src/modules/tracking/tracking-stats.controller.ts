@@ -1,10 +1,8 @@
 import {
-  Body,
   Controller,
   Get,
   HttpCode,
   HttpStatus,
-  Post,
   Query,
   Req,
   UnauthorizedException,
@@ -25,23 +23,13 @@ export class TrackingStatsController {
     private readonly trackingStatsService: TrackingStatsService,
   ) {}
 
-  @Post('query')
-  @HttpCode(HttpStatus.OK)
-  async queryByBody(
-    @Body() body: StatsQueryDto,
-    @Req() request: Request,
-  ): Promise<StatsQueryResponse> {
-    this.assertAuthorized(request);
-    return this.trackingStatsService.queryStats(body);
-  }
-
   @Get('query')
   @HttpCode(HttpStatus.OK)
   async queryByParams(
     @Query() query: StatsQueryDto,
     @Req() request: Request,
   ): Promise<StatsQueryResponse> {
-    this.assertAuthorized(request);
+    // this.assertAuthorized(request);
     return this.trackingStatsService.queryStats(query);
   }
 

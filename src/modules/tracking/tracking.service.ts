@@ -29,6 +29,7 @@ export class TrackingService {
   private readonly logsQueueKey: string;
   private readonly dedupeTtlSeconds: number;
   private readonly detailLinkEndpoint: string;
+  private readonly linkDetailCacheTtlSeconds: number;
 
   constructor(
     private readonly configService: ConfigService,
@@ -47,6 +48,10 @@ export class TrackingService {
     this.detailLinkEndpoint = (
       this.configService.get<string>('DETAIL_LINK_ENDPOINT', '') || ''
     ).trim();
+    this.linkDetailCacheTtlSeconds = this.configService.get<number>(
+      'LINK_DETAIL_CACHE_TTL_SECONDS',
+      60,
+    );
   }
 
   async trackVisit(
@@ -244,6 +249,24 @@ export class TrackingService {
       return null;
     }
 
+    const cacheKey = this.buildLinkCacheKey(alias);
+    try {
+      const cached = await this.redisService.getClient().get(cacheKey);
+      if (cached) {
+        const cachedLink = this.normalizeDetailPayload(JSON.parse(cached));
+        if (cachedLink) {
+          return cachedLink;
+        }
+
+        this.logger.warn(`Invalid cached link payload for alias ${alias}`);
+        await this.redisService.getClient().del(cacheKey);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed reading link cache for alias ${alias}: ${(error as Error).message}`,
+      );
+    }
+
     const requestUrl = this.buildDetailLinkUrl(alias);
 
     try {
@@ -253,6 +276,23 @@ export class TrackingService {
       if (!link) {
         this.logger.warn(
           `Invalid link detail payload for alias ${alias} from ${requestUrl}`,
+        );
+
+        return null;
+      }
+
+      try {
+        await this.redisService
+          .getClient()
+          .set(
+            cacheKey,
+            JSON.stringify(link),
+            'EX',
+            this.linkDetailCacheTtlSeconds,
+          );
+      } catch (cacheError) {
+        this.logger.warn(
+          `Failed writing link cache for alias ${alias}: ${(cacheError as Error).message}`,
         );
       }
 
@@ -325,6 +365,10 @@ export class TrackingService {
   private buildDetailLinkUrl(alias: string): string {
     const encodedAlias = encodeURIComponent(alias);
     return this.detailLinkEndpoint.replace(/\{alias\}/g, encodedAlias);
+  }
+
+  private buildLinkCacheKey(alias: string): string {
+    return `link:detail:${sanitizeAlias(alias)}`;
   }
 
   private normalizeDetailPayload(payload: unknown): LinkData | null {

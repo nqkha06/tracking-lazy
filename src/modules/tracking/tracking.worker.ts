@@ -49,29 +49,47 @@ export class TrackingWorker {
 
   @Interval(1500)
   async flushLogsToMysql(): Promise<void> {
-    const rawLogs = await this.redisService.popBatchFromList(
-      this.logsQueueKey,
-      1000,
-    );
-    if (!rawLogs.length) {
-      return;
-    }
-
-    const parsedLogs = this.deserializeLogs(rawLogs);
-    if (!parsedLogs.length) {
-      return;
-    }
+    let rawLogs: string[] = [];
 
     try {
+      rawLogs = await this.redisService.popBatchFromList(
+        this.logsQueueKey,
+        1000,
+      );
+      if (!rawLogs.length) {
+        return;
+      }
+
+      const parsedLogs = this.deserializeLogs(rawLogs);
+      if (!parsedLogs.length) {
+        return;
+      }
+
       await this.withRetry(
         () => this.trackingRepository.bulkInsertDailyAccessLogs(parsedLogs),
         3,
       );
     } catch (error) {
-      await this.redisService.requeueToTail(this.logsQueueKey, rawLogs);
+      if (this.isRedisClosedError(error)) {
+        this.logger.warn(
+          'Skip flushLogsToMysql tick: Redis connection is closed',
+        );
+        return;
+      }
+
       this.logger.error(
-        `Failed to insert daily log batch, returned ${rawLogs.length} rows to Redis queue: ${(error as Error).message}`,
+        `Failed to insert daily log batch: ${(error as Error).message}`,
       );
+
+      if (rawLogs.length) {
+        try {
+          await this.redisService.requeueToTail(this.logsQueueKey, rawLogs);
+        } catch (requeueError) {
+          this.logger.error(
+            `Failed to return ${rawLogs.length} rows back to Redis queue: ${(requeueError as Error).message}`,
+          );
+        }
+      }
     }
   }
 
@@ -79,17 +97,19 @@ export class TrackingWorker {
   async migrateDailyLogsToMain(): Promise<void> {
     const lockKey = 'lock:access_logs_daily_migration';
     const lockToken = randomUUID();
-    const lockAcquired = await this.redisService.acquireLock(
-      lockKey,
-      lockToken,
-      55_000,
-    );
-
-    if (!lockAcquired) {
-      return;
-    }
+    let lockAcquired = false;
 
     try {
+      lockAcquired = await this.redisService.acquireLock(
+        lockKey,
+        lockToken,
+        55_000,
+      );
+
+      if (!lockAcquired) {
+        return;
+      }
+
       const beforeDate = this.startOfUtcDay(new Date());
       let movedTotal = 0;
 
@@ -115,11 +135,28 @@ export class TrackingWorker {
         );
       }
     } catch (error) {
+      if (this.isRedisClosedError(error)) {
+        this.logger.warn(
+          'Skip migrateDailyLogsToMain tick: Redis connection is closed',
+        );
+        return;
+      }
+
       this.logger.error(
         `Failed to migrate daily logs to main table: ${(error as Error).message}`,
       );
     } finally {
-      await this.redisService.releaseLock(lockKey, lockToken);
+      if (lockAcquired) {
+        try {
+          await this.redisService.releaseLock(lockKey, lockToken);
+        } catch (error) {
+          if (!this.isRedisClosedError(error)) {
+            this.logger.warn(
+              `Failed to release migration lock: ${(error as Error).message}`,
+            );
+          }
+        }
+      }
     }
   }
 
@@ -127,17 +164,19 @@ export class TrackingWorker {
   async aggregateAndSyncStats(): Promise<void> {
     const lockKey = 'lock:stats_aggregation';
     const lockToken = randomUUID();
-    const lockAcquired = await this.redisService.acquireLock(
-      lockKey,
-      lockToken,
-      55_000,
-    );
-
-    if (!lockAcquired) {
-      return;
-    }
+    let lockAcquired = false;
 
     try {
+      lockAcquired = await this.redisService.acquireLock(
+        lockKey,
+        lockToken,
+        55_000,
+      );
+
+      if (!lockAcquired) {
+        return;
+      }
+
       const allKeys = await this.redisService.scanKeys('stat:minute:*');
       if (!allKeys.length) {
         return;
@@ -163,12 +202,33 @@ export class TrackingWorker {
 
       await this.redisService.del(targetKeys);
     } catch (error) {
+      if (this.isRedisClosedError(error)) {
+        this.logger.warn(
+          'Skip aggregateAndSyncStats tick: Redis connection is closed',
+        );
+        return;
+      }
+
       this.logger.error(
         `Failed to sync stats to Laravel endpoint ${this.statsSyncEndpoint}: ${(error as Error).message}`,
       );
     } finally {
-      await this.redisService.releaseLock(lockKey, lockToken);
+      if (lockAcquired) {
+        try {
+          await this.redisService.releaseLock(lockKey, lockToken);
+        } catch (error) {
+          if (!this.isRedisClosedError(error)) {
+            this.logger.warn(
+              `Failed to release stats aggregation lock: ${(error as Error).message}`,
+            );
+          }
+        }
+      }
     }
+  }
+
+  private isRedisClosedError(error: unknown): boolean {
+    return (error as Error)?.message?.toLowerCase().includes('connection is closed') ?? false;
   }
 
   private deserializeLogs(rawLogs: string[]): AccessLogQueuePayload[] {
