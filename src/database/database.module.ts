@@ -38,6 +38,32 @@ function parseBoolean(
         },
       }),
     }),
+    TypeOrmModule.forRootAsync({
+      name: 'application',
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        type: 'mysql' as const,
+        host: configService.get<string>('A_DB_HOST', '127.0.0.1'),
+        port: configService.get<number>('A_DB_PORT', 3306),
+        username: configService.get<string>('A_DB_USER', 'root'),
+        password: configService.get<string>('A_DB_PASSWORD', ''),
+        database: configService.get<string>('A_DB_NAME', 'tracking'),
+        charset: 'utf8mb4_unicode_ci',
+        timezone: configService.get<string>(
+          'A_DB_TIMEZONE',
+          configService.get<string>('DB_TIMEZONE', 'Z'),
+        ),
+        entities: [],
+        synchronize: parseBoolean(
+          configService.get<string>('A_DB_SYNC'),
+          false,
+        ),
+        logging: parseBoolean(configService.get<string>('A_DB_LOGGING'), false),
+        extra: {
+          connectionLimit: configService.get<number>('A_DB_POOL_SIZE', 50),
+        },
+      }),
+    }),
   ],
 })
 export class DatabaseModule {}

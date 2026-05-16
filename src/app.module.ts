@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { DatabaseModule } from './database/database.module';
 import { HttpModule } from './http/http.module';
+import { StuModule } from './modules/stu/stu.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
 import { RedisModule } from './redis/redis.module';
 import { UaParserService } from './ua-parser/ua-parser.service';
@@ -22,6 +23,7 @@ import { UaParserService } from './ua-parser/ua-parser.service';
     DatabaseModule,
     RedisModule,
     HttpModule,
+    StuModule,
     TrackingModule,
   ],
   providers: [

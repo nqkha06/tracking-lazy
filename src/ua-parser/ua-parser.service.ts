@@ -1,15 +1,15 @@
 import { Injectable } from '@nestjs/common';
-const UAParser = require('ua-parser-js');
+import UAParser from 'ua-parser-js';
 
 @Injectable()
 export class UaParserService {
-    private readonly uaParser: any;
+  private readonly uaParser: UAParser.UAParser;
 
-    constructor() {
-        this.uaParser = new UAParser();
-    }
+  constructor() {
+    this.uaParser = new UAParser.UAParser();
+  }
 
-    public parse(userAgent: string) {
-        return this.uaParser.setUA(userAgent).getResult();
-    }
+  public parse(userAgent: string): UAParser.IResult {
+    return this.uaParser.setUA(userAgent).getResult();
+  }
 }
