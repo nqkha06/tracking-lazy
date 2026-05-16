@@ -20,7 +20,14 @@ import {
 } from '../../utils/detection.util';
 import { md5 } from '../../utils/hash.util';
 import { TrackRequestDto } from './dto/track-request.dto';
-import { AccessLogQueuePayload, LinkData, TrackResult } from './tracking.types';
+import {
+  AccessLogQueuePayload,
+  LinkData,
+  LinkRateConfig,
+  LinkRates,
+  LinkTier,
+  TrackResult,
+} from './tracking.types';
 import { TrackingRepository } from './tracking.repository';
 
 @Injectable()
@@ -93,7 +100,7 @@ export class TrackingService {
       };
     }
 
-    const link = await this.getLinkByAlias(cleanAlias);
+    const link = await this.getLinkByAlias(cleanAlias, country);
 
     if (!link) {
       // await this.enqueueLog({
@@ -116,7 +123,7 @@ export class TrackingService {
       };
     }
 
-    if (link.status !== 1) {
+    if (link.status.toLowerCase() !== 'active') {
       // link is not active
       await this.enqueueLog({
         link_id: link.link_id,
@@ -147,8 +154,12 @@ export class TrackingService {
       this.dedupeTtlSeconds,
     );
 
-    const rate = device === 'mobile' ? link.rate.mobile : link.rate.desktop;
-    let revenue = isFirstVisit ? rate / 1000 : 0;
+    const rateConfig = this.resolveRateConfig(link.rates, country);
+    const payout =
+      device === 'mobile'
+        ? rateConfig.payout.mobile
+        : rateConfig.payout.desktop;
+    let revenue = isFirstVisit ? payout / 1000 : 0;
     let isEarn = isFirstVisit ? 1 : 0;
 
     if (isFirstVisit) {
@@ -171,7 +182,7 @@ export class TrackingService {
       }
     }
 
-    const fakePercent = 7 + link.tier.bonus;
+    const fakePercent = 7 + link.tier.bonus_percent;
     const roll = Math.floor(Math.random() * 10000) + 1;
 
     if (roll <= fakePercent * 100) {
@@ -195,13 +206,13 @@ export class TrackingService {
 
       return {
         ok: true,
-        code: 'FAKE_VIEW_BYPASS',
-        linkId: link.link_id,
-        userId: link.user_id,
-        isEarn,
-        revenue,
-        isFake: true,
-        device,
+        // code: 'FAKE_VIEW_BYPASS',
+        // linkId: link.link_id,
+        // userId: link.user_id,
+        // isEarn,
+        // revenue,
+        // isFake: true,
+        // device,
       };
     }
 
@@ -233,27 +244,27 @@ export class TrackingService {
 
     return {
       ok: true,
-      code: 'ACCEPTED',
-      linkId: link.link_id,
-      userId: link.user_id,
-      isEarn,
-      revenue,
-      isFake: false,
-      device,
+      // code: 'ACCEPTED',
+      // linkId: link.link_id,
+      // userId: link.user_id,
+      // isEarn,
+      // revenue,
+      // isFake: false,
+      // device,
     };
   }
 
-  async getLinkByAlias(alias: string): Promise<LinkData | null> {
+  async getLinkByAlias(alias: string, country?: string): Promise<LinkData | null> {
     if (!this.detailLinkEndpoint) {
       this.logger.error('DETAIL_LINK_ENDPOINT is empty');
       return null;
     }
 
-    const cacheKey = this.buildLinkCacheKey(alias);
+    const cacheKey = this.buildLinkCacheKey(alias, country);
     try {
       const cached = await this.redisService.getClient().get(cacheKey);
       if (cached) {
-        const cachedLink = this.normalizeDetailPayload(JSON.parse(cached));
+        const cachedLink = this.parseLinkDetailPayload(JSON.parse(cached));
         if (cachedLink) {
           return cachedLink;
         }
@@ -271,7 +282,7 @@ export class TrackingService {
 
     try {
       const response = await this.httpService.getWithRetry<unknown>(requestUrl);
-      const link = this.normalizeDetailPayload(response);
+      const link = this.parseLinkDetailPayload(response);
 
       if (!link) {
         this.logger.warn(
@@ -354,6 +365,7 @@ export class TrackingService {
   }
 
   private sanitizeIp(ip: string): string {
+    return "123.23.2.29";
     const trimmed = (ip || '').trim();
     if (!trimmed) {
       return '0.0.0.0';
@@ -367,71 +379,33 @@ export class TrackingService {
     return this.detailLinkEndpoint.replace(/\{alias\}/g, encodedAlias);
   }
 
-  private buildLinkCacheKey(alias: string): string {
-    return `link:detail:${sanitizeAlias(alias)}`;
+  private buildLinkCacheKey(alias: string, country?: string): string {
+    const normalizedCountry = sanitizeCountry(country || 'UNK');
+    return `link:detail:${sanitizeAlias(alias)}:${normalizedCountry}`;
   }
 
-  private normalizeDetailPayload(payload: unknown): LinkData | null {
-    const direct = this.normalizeLinkData(payload);
-    if (direct) {
-      return direct;
-    }
-
+  private parseLinkDetailPayload(payload: unknown): LinkData | null {
     if (!this.isRecord(payload)) {
       return null;
     }
 
-    const topLevelKeys = ['data', 'result', 'link', 'detail'];
-    for (const key of topLevelKeys) {
-      const nested = this.normalizeLinkData(payload[key]);
-      if (nested) {
-        return nested;
-      }
-
-      if (!this.isRecord(payload[key])) {
-        continue;
-      }
-
-      for (const secondLevelKey of topLevelKeys) {
-        const deepNested = this.normalizeLinkData(payload[key][secondLevelKey]);
-        if (deepNested) {
-          return deepNested;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  private normalizeLinkData(value: unknown): LinkData | null {
-    if (!this.isRecord(value)) {
-      return null;
-    }
-
-    const rate = value.rate;
-    const tier = value.tier;
-    if (!this.isRecord(rate) || !this.isRecord(tier)) {
-      return null;
-    }
-
-    const linkId = this.toNumber(value.link_id);
-    const userId = this.toNumber(value.user_id);
-    const levelId = this.toNumber(value.level_id);
-    const status = this.toNumber(value.status);
-    const mobileRate = this.toNumber(rate.mobile);
-    const desktopRate = this.toNumber(rate.desktop);
-    const tierId = this.toNumber(tier.id);
-    const tierBonus = this.toNumber(tier.bonus);
+    const linkId = this.toNumber(payload.link_id);
+    const userId = this.toNumber(payload.user_id);
+    const levelId = this.toNumber(payload.level_id);
+    const status =
+      typeof payload.status === 'string'
+        ? payload.status.trim().toLowerCase()
+        : '';
+    const rates = this.parseLinkRates(payload.rates);
+    const tier = this.parseLinkTier(payload.tier);
 
     if (
       linkId === null ||
       userId === null ||
       levelId === null ||
-      status === null ||
-      mobileRate === null ||
-      desktopRate === null ||
-      tierId === null ||
-      tierBonus === null
+      !status ||
+      !rates ||
+      !tier
     ) {
       return null;
     }
@@ -441,15 +415,99 @@ export class TrackingService {
       user_id: userId,
       level_id: levelId,
       status,
-      rate: {
-        mobile: mobileRate,
-        desktop: desktopRate,
-      },
-      tier: {
-        id: tierId,
-        bonus: tierBonus,
-      },
+      rates,
+      tier,
     };
+  }
+
+  private parseLinkRates(value: unknown): LinkRates | null {
+    if (!this.isRecord(value)) {
+      return null;
+    }
+
+    const defaultRate = this.parseLinkRateConfig(value.default);
+    if (!defaultRate) {
+      return null;
+    }
+
+    const countriesNode = this.isRecord(value.countries) ? value.countries : {};
+    const countries: Record<string, LinkRateConfig> = {};
+
+    for (const [countryCode, config] of Object.entries(countriesNode)) {
+      const parsed = this.parseLinkRateConfig(config);
+      if (!parsed) {
+        continue;
+      }
+
+      countries[sanitizeCountry(countryCode)] = parsed;
+    }
+
+    return {
+      default: defaultRate,
+      countries,
+    };
+  }
+
+  private parseLinkRateConfig(value: unknown): LinkRateConfig | null {
+    if (!this.isRecord(value)) {
+      return null;
+    }
+
+    const payout = this.parseRatePair(value.payout);
+    const dailyLimit = this.parseRatePair(value.daily_limit);
+
+    if (!payout || !dailyLimit) {
+      return null;
+    }
+
+    return {
+      payout,
+      daily_limit: dailyLimit,
+    };
+  }
+
+  private parseRatePair(value: unknown): { mobile: number; desktop: number } | null {
+    if (!this.isRecord(value)) {
+      return null;
+    }
+
+    const mobile = this.toNumber(value.mobile);
+    const desktop = this.toNumber(value.desktop);
+
+    if (mobile === null || desktop === null) {
+      return null;
+    }
+
+    return {
+      mobile,
+      desktop,
+    };
+  }
+
+  private parseLinkTier(value: unknown): LinkTier | null {
+    if (!this.isRecord(value)) {
+      return null;
+    }
+
+    const level = this.toNumber(value.level);
+    const bonusPercent = this.toNumber(value.bonus_percent);
+
+    if (level === null || bonusPercent === null) {
+      return null;
+    }
+
+    return {
+      level,
+      bonus_percent: bonusPercent,
+    };
+  }
+
+  private resolveRateConfig(
+    rates: LinkRates,
+    country?: string,
+  ): LinkRateConfig {
+    const countryCode = sanitizeCountry(country || 'UNK');
+    return rates.countries[countryCode] || rates.default;
   }
 
   private toNumber(value: unknown): number | null {

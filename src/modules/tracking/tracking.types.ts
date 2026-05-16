@@ -5,17 +5,27 @@ export interface LinkRate {
   desktop: number;
 }
 
+export interface LinkRateConfig {
+  payout: LinkRate;
+  daily_limit: LinkRate;
+}
+
+export interface LinkRates {
+  default: LinkRateConfig;
+  countries: Record<string, LinkRateConfig>;
+}
+
 export interface LinkTier {
-  id: number;
-  bonus: number;
+  level: number;
+  bonus_percent: number;
 }
 
 export interface LinkData {
   link_id: number;
   user_id: number;
   level_id: number;
-  status: number;
-  rate: LinkRate;
+  status: string;
+  rates: LinkRates;
   tier: LinkTier;
 }
 
@@ -139,11 +149,12 @@ export type StatsGroupedRow = Record<string, string | number | null>;
 
 export interface TrackResult {
   ok: boolean;
-  code: string;
+  code?: string;
   linkId?: number;
   userId?: number;
   isEarn?: number;
   revenue?: number;
   isFake?: boolean;
   device?: DeviceKind;
+  body?: any;
 }

@@ -8,8 +8,8 @@ Production-oriented NestJS tracking backend for a link monetization platform.
 - `GET /api/internal/stats/query` internal stats endpoint for Laravel dashboards
 - Redis visit dedupe: `SET visit:{alias}:{ip}:{date} 1 NX EX 86400`
 - Device detection (`mobile`, `desktop`, `tablet`)
-- Revenue calculation inside NestJS (`rate / 1000`)
-- Fake-view short-circuit logic (`7 + tier.bonus`)
+- Revenue calculation inside NestJS (`rates.{country|default}.payout / 1000`)
+- Fake-view short-circuit logic (`7 + tier.bonus_percent`)
 - Bitmask detection flags:
   - `1`: `AD_BLOCK`
   - `2`: `PROXY_VPN`

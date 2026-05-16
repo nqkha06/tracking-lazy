@@ -83,13 +83,9 @@ interface StatsQueryMeta {
 
 export interface StatsQueryResponse {
   success: true;
-  code: 'STATS_QUERY_OK';
   message: 'ok';
-  generated_at: string;
   meta: StatsQueryMeta;
-  data: {
-    rows: StatsGroupedRow[];
-  };
+  data: StatsGroupedRow[];
 }
 
 @Injectable()
@@ -113,8 +109,6 @@ export class TrackingStatsService {
     'revenue',
     'detection_mask',
     'reject_reason_mask',
-    'user_agents.browser',
-    'user_agents.os',
   ];
 
   // Metadata-driven stats fields: define once for validate/filter/select/group
@@ -327,9 +321,7 @@ export class TrackingStatsService {
 
     return {
       success: true,
-      code: 'STATS_QUERY_OK',
       message: 'ok',
-      generated_at: generatedAt,
       meta: {
         timezone: 'UTC',
         mode: aggregate ? 'aggregate' : 'raw',
@@ -365,9 +357,7 @@ export class TrackingStatsService {
         },
         generated_at: generatedAt,
       },
-      data: {
-        rows,
-      },
+      data: rows,
     };
   }
 

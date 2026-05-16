@@ -23,14 +23,15 @@ export class TrackingController {
     @Body() body: TrackRequestDto,
     @Req() request: Request,
   ): Promise<TrackResult> {
-    const ipAddress = this.extractClientIp(request);
-    const userAgent = request.header('user-agent') || '';
-
-    return this.trackingService.trackVisit(alias, body, ipAddress, userAgent);
+    const xxIpAddress = this.extractClientIp(request);
+    const xxUa = request.header('xx-ua') || '';
+    const xxReferer = request.header('xx-referer') || '';
+    
+    return this.trackingService.trackVisit(alias, body, xxIpAddress, xxUa);
   }
 
   private extractClientIp(request: Request): string {
-    const forwardedFor = request.header('x-forwarded-for');
+    const forwardedFor = request.header('xx-ip-address') || request.header('x-forwarded-for');
     if (typeof forwardedFor === 'string' && forwardedFor.length > 0) {
       const firstIp = forwardedFor.split(',')[0];
       return (firstIp || '').trim();

@@ -29,7 +29,7 @@ function parseBoolean(
         password: configService.get<string>('DB_PASSWORD', ''),
         database: configService.get<string>('DB_NAME', 'tracking'),
         charset: 'utf8mb4_unicode_ci',
-        timezone: 'Z',
+        timezone: configService.get<string>('DB_TIMEZONE', 'Z'),
         entities: [AccessLogEntity, AccessLogDailyEntity, UserAgentEntity],
         synchronize: parseBoolean(configService.get<string>('DB_SYNC'), false),
         logging: parseBoolean(configService.get<string>('DB_LOGGING'), false),

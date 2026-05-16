@@ -56,6 +56,8 @@ Field notes:
   - data fields: `created_at`, `date`, `link_id`, `user_id`, `ip_address`, `country`, `device`, `is_earn`, `revenue`, `detection_mask`, `reject_reason_mask`, `user_agents.browser`, `user_agents.os`
   - metric fields: `views`, `revenue`, `earn_views`, `unique_users`, `unique_ips`
   - Không còn hỗ trợ alias cũ: `day`, `clicks`
+  - Nếu `select` rỗng ở raw mode: mặc định chỉ lấy field bảng chính (`access_logs`/`access_logs_daily`), không tự lấy `user_agents.*`
+  - Nếu `select` rỗng ở aggregate mode: mặc định lấy `group_fields` + metrics mặc định (`views`, `revenue`, `earn_views`)
 - `group_fields`: danh sách field group (nếu có)
   - Chỉ khi có `group_fields` thì mới aggregate
   - Nếu truyền `created_at` trong `group_fields` thì hệ thống tự map thành `date(created_at)` (field `date`)
@@ -272,7 +274,7 @@ HTTP status luôn `200 OK` ở flow nghiệp vụ tracking (kể cả reject log
 - `FAKE_VIEW_BYPASS`: trúng fake-view rule, return sớm
 - `INVALID_ALIAS`: alias sai format
 - `LINK_NOT_FOUND`: không tìm thấy alias
-- `LINK_INACTIVE`: link tồn tại nhưng `status != 1`
+- `LINK_INACTIVE`: link tồn tại nhưng `status != "active"`
 
 ---
 
@@ -280,17 +282,17 @@ HTTP status luôn `200 OK` ở flow nghiệp vụ tracking (kể cả reject log
 
 1. Validate alias format.
 2. Load link by alias qua `GET {DETAIL_LINK_ENDPOINT}` (replace `{alias}`).
-3. Reject nếu link không tồn tại hoặc `status != 1`.
+3. Reject nếu link không tồn tại hoặc `status != "active"`.
 4. Dedupe Redis theo ngày:
    - Key: `visit:{alias}:{ip}:{YYYYMMDD}`
    - Command: `SET ... NX EX 86400`
 5. Detect device từ `User-Agent`:
    - `mobile | desktop | tablet`
 6. Revenue:
-   - `rate = mobile ? rate.mobile : rate.desktop`
-   - `revenue = rate / 1000`
+   - `payout = mobile ? rates.{country|default}.payout.mobile : rates.{country|default}.payout.desktop`
+   - `revenue = payout / 1000`
 7. Fake view logic:
-   - `fakePercent = 7 + tier.bonus`
+   - `fakePercent = 7 + tier.bonus_percent`
    - random `1..10000`
    - nếu `roll <= fakePercent * 100` thì bypass earn (`revenue = 0`, `isEarn = 0`)
 8. Detection mask:
@@ -385,26 +387,51 @@ Service gọi endpoint:
 
 - `GET {DETAIL_LINK_ENDPOINT}` (ví dụ: `http://localhost:8000/api/stu/{alias}/details`)
 
-Payload hợp lệ tối thiểu:
+Payload bắt buộc từ Laravel:
 
 ```json
 {
-  "link_id": 123,
-  "user_id": 456,
-  "level_id": 2,
-  "status": 1,
-  "rate": {
-    "mobile": 0.5,
-    "desktop": 1.2
+  "link_id": 113612,
+  "user_id": 2,
+  "level_id": 7,
+  "status": "active",
+  "rates": {
+    "default": {
+      "payout": {
+        "mobile": 4.5,
+        "desktop": 4.5
+      },
+      "daily_limit": {
+        "mobile": 1,
+        "desktop": 1
+      }
+    },
+    "countries": {
+      "VN": {
+        "payout": {
+          "mobile": 4.5,
+          "desktop": 4.5
+        },
+        "daily_limit": {
+          "mobile": 1,
+          "desktop": 1
+        }
+      }
+    }
   },
   "tier": {
-    "id": 2,
-    "bonus": 3
+    "level": 0,
+    "bonus_percent": 0
   }
 }
 ```
 
-Service có normalize để chấp nhận một số wrapper phổ biến (`data`, `result`, `link`, `detail`).
+Parser chỉ nhận schema mới:
+
+- `status` dạng string (ví dụ: `active`)
+- `rates.default.payout.*`
+- `rates.countries.{COUNTRY}.payout.*` (ưu tiên theo country request, fallback default)
+- `tier.level`, `tier.bonus_percent`
 
 ---
 
