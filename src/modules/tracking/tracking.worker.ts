@@ -29,10 +29,7 @@ export class TrackingWorker {
     private readonly trackingRepository: TrackingRepository,
     private readonly httpService: HttpService,
   ) {
-    this.logsQueueKey = this.configService.get<string>(
-      'LOGS_QUEUE_KEY',
-      'logs_queue',
-    );
+    this.logsQueueKey = this.configService.get<string>('LOGS_QUEUE_KEY', 'logs_queue');
     this.statsSyncEndpoint = this.configService.get<string>(
       'LARAVEL_STATS_ENDPOINT',
       'http://localhost:9999/internal/stats/update',
@@ -52,10 +49,7 @@ export class TrackingWorker {
     let rawLogs: string[] = [];
 
     try {
-      rawLogs = await this.redisService.popBatchFromList(
-        this.logsQueueKey,
-        1000,
-      );
+      rawLogs = await this.redisService.popBatchFromList(this.logsQueueKey, 1000);
       if (!rawLogs.length) {
         return;
       }
@@ -65,21 +59,14 @@ export class TrackingWorker {
         return;
       }
 
-      await this.withRetry(
-        () => this.trackingRepository.bulkInsertDailyAccessLogs(parsedLogs),
-        3,
-      );
+      await this.withRetry(() => this.trackingRepository.bulkInsertDailyAccessLogs(parsedLogs), 3);
     } catch (error) {
       if (this.isRedisClosedError(error)) {
-        this.logger.warn(
-          'Skip flushLogsToMysql tick: Redis connection is closed',
-        );
+        this.logger.warn('Skip flushLogsToMysql tick: Redis connection is closed');
         return;
       }
 
-      this.logger.error(
-        `Failed to insert daily log batch: ${(error as Error).message}`,
-      );
+      this.logger.error(`Failed to insert daily log batch: ${(error as Error).message}`);
 
       if (rawLogs.length) {
         try {
@@ -100,11 +87,7 @@ export class TrackingWorker {
     let lockAcquired = false;
 
     try {
-      lockAcquired = await this.redisService.acquireLock(
-        lockKey,
-        lockToken,
-        55_000,
-      );
+      lockAcquired = await this.redisService.acquireLock(lockKey, lockToken, 55_000);
 
       if (!lockAcquired) {
         return;
@@ -130,30 +113,22 @@ export class TrackingWorker {
       }
 
       if (movedTotal > 0) {
-        this.logger.log(
-          `Migrated ${movedTotal} rows from access_logs_daily to access_logs`,
-        );
+        this.logger.log(`Migrated ${movedTotal} rows from access_logs_daily to access_logs`);
       }
     } catch (error) {
       if (this.isRedisClosedError(error)) {
-        this.logger.warn(
-          'Skip migrateDailyLogsToMain tick: Redis connection is closed',
-        );
+        this.logger.warn('Skip migrateDailyLogsToMain tick: Redis connection is closed');
         return;
       }
 
-      this.logger.error(
-        `Failed to migrate daily logs to main table: ${(error as Error).message}`,
-      );
+      this.logger.error(`Failed to migrate daily logs to main table: ${(error as Error).message}`);
     } finally {
       if (lockAcquired) {
         try {
           await this.redisService.releaseLock(lockKey, lockToken);
         } catch (error) {
           if (!this.isRedisClosedError(error)) {
-            this.logger.warn(
-              `Failed to release migration lock: ${(error as Error).message}`,
-            );
+            this.logger.warn(`Failed to release migration lock: ${(error as Error).message}`);
           }
         }
       }
@@ -167,11 +142,7 @@ export class TrackingWorker {
     let lockAcquired = false;
 
     try {
-      lockAcquired = await this.redisService.acquireLock(
-        lockKey,
-        lockToken,
-        55_000,
-      );
+      lockAcquired = await this.redisService.acquireLock(lockKey, lockToken, 55_000);
 
       if (!lockAcquired) {
         return;
@@ -203,9 +174,7 @@ export class TrackingWorker {
       await this.redisService.del(targetKeys);
     } catch (error) {
       if (this.isRedisClosedError(error)) {
-        this.logger.warn(
-          'Skip aggregateAndSyncStats tick: Redis connection is closed',
-        );
+        this.logger.warn('Skip aggregateAndSyncStats tick: Redis connection is closed');
         return;
       }
 
@@ -241,18 +210,14 @@ export class TrackingWorker {
           parsed.push(payload);
         }
       } catch (error) {
-        this.logger.warn(
-          `Skipping invalid queue payload: ${(error as Error).message}`,
-        );
+        this.logger.warn(`Skipping invalid queue payload: ${(error as Error).message}`);
       }
     }
 
     return parsed;
   }
 
-  private async buildStatsPayload(
-    keys: string[],
-  ): Promise<LaravelStatsPayload> {
+  private async buildStatsPayload(keys: string[]): Promise<LaravelStatsPayload> {
     const pipeline = this.redisService.createPipeline();
     keys.forEach((key) => pipeline.hgetall(key));
 
@@ -313,10 +278,7 @@ export class TrackingWorker {
     };
   }
 
-  private async withRetry<T>(
-    callback: () => Promise<T>,
-    maxRetries: number,
-  ): Promise<T> {
+  private async withRetry<T>(callback: () => Promise<T>, maxRetries: number): Promise<T> {
     let attempt = 0;
     let lastError: Error | undefined;
 
@@ -336,8 +298,6 @@ export class TrackingWorker {
   }
 
   private startOfUtcDay(value: Date): Date {
-    return new Date(
-      Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
-    );
+    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
   }
 }

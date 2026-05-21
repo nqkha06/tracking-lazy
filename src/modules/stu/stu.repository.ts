@@ -56,7 +56,7 @@ export class StuRepository {
 
   async findLevelById(levelId: number): Promise<StuLevelRow | null> {
     const result = (await this.dataSource.query(
-      `SELECT id, pageload_config AS redirect_settings
+      `SELECT id, redirect_settings
       FROM ${this.levelsTable}
       WHERE id = ?
       LIMIT 1`,

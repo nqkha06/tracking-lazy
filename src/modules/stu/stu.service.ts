@@ -5,19 +5,16 @@ import { RedisService } from '../../redis/redis.service';
 import { UaParserService } from '../../ua-parser/ua-parser.service';
 import { isAliasValid, sanitizeAlias } from '../../utils/detection.util';
 import { StuRepository } from './stu.repository';
-import {
-  StuLinkInfo,
-  StuRedirectConfig,
-  StuRule,
-  StuShowData,
-  StuUserContext,
-} from './stu.types';
+import { StuLinkInfo, StuRedirectConfig, StuRule, StuShowData, StuUserContext } from './stu.types';
 
 @Injectable()
 export class StuService {
   private readonly logger = new Logger(StuService.name);
   private readonly cacheTtlSeconds: number;
   private readonly userContextTtlSeconds: number;
+  private readonly cacheVersionKey: string;
+  private readonly cacheVersionTtlMs: number;
+  private cacheVersion = { value: '1', expiresAt: 0 };
 
   constructor(
     private readonly configService: ConfigService,
@@ -25,20 +22,23 @@ export class StuService {
     private readonly stuRepository: StuRepository,
     private readonly uaParserService: UaParserService,
   ) {
-    this.cacheTtlSeconds = this.configService.get<number>(
-      'STU_CACHE_TTL_SECONDS',
-      3600,
-    );
+    this.cacheTtlSeconds = this.configService.get<number>('STU_CACHE_TTL_SECONDS', 3600);
     this.userContextTtlSeconds = this.configService.get<number>(
       'STU_USER_CONTEXT_TTL_SECONDS',
       3600,
     );
+    this.cacheVersionKey = this.configService.get<string>(
+      'STU_CACHE_VERSION_KEY',
+      'stu:cache:version',
+    );
+    const cacheVersionTtlSeconds = this.configService.get<number>(
+      'STU_CACHE_VERSION_TTL_SECONDS',
+      30,
+    );
+    this.cacheVersionTtlMs = Math.max(1, cacheVersionTtlSeconds) * 1000;
   }
 
-  async getShowData(
-    alias: string,
-    request: Request,
-  ): Promise<StuShowData | null> {
+  async getShowData(alias: string, request: Request): Promise<StuShowData | null> {
     const cleanAlias = sanitizeAlias(alias);
     if (!isAliasValid(cleanAlias)) {
       return null;
@@ -62,12 +62,10 @@ export class StuService {
   }
 
   buildUserContext(request: Request, ipAddress: string): StuUserContext {
-    const rawUserAgent =
-      request.header('user-agent') || request.header('xx-ua') || '';
+    const rawUserAgent = request.header('user-agent') || request.header('xx-ua') || '';
     const parsed = this.uaParserService.parse(rawUserAgent);
     const language = this.extractPrimaryLanguage(request);
-    const referrer =
-      request.header('referer') || request.header('xx-referer') || 'direct';
+    const referrer = request.header('referer') || request.header('xx-referer') || 'direct';
 
     return {
       os: this.normalizeText(parsed?.os?.name, 'unknown'),
@@ -98,21 +96,14 @@ export class StuService {
 
       const rule = candidate as StuRule;
       const conditions = this.isRecord(rule.conditions) ? rule.conditions : {};
-      const exclude = this.isRecord(conditions.exclude)
-        ? conditions.exclude
-        : {};
-      const include = this.isRecord(conditions.include)
-        ? conditions.include
-        : {};
+      const exclude = this.isRecord(conditions.exclude) ? conditions.exclude : {};
+      const include = this.isRecord(conditions.include) ? conditions.include : {};
 
       if (this.isMatched(userContext, exclude)) {
         continue;
       }
 
-      if (
-        Object.keys(include).length === 0 ||
-        this.isMatched(userContext, include)
-      ) {
+      if (Object.keys(include).length === 0 || this.isMatched(userContext, include)) {
         matchedRules.push(rule);
       }
     }
@@ -127,9 +118,7 @@ export class StuService {
         : 'priority';
 
     if (strategy === 'priority') {
-      return matchedRules.sort(
-        (a, b) => this.toNumber(b.priority) - this.toNumber(a.priority),
-      )[0];
+      return matchedRules.sort((a, b) => this.toNumber(b.priority) - this.toNumber(a.priority))[0];
     }
 
     if (strategy === 'random') {
@@ -139,9 +128,7 @@ export class StuService {
     return matchedRules[0];
   }
 
-  private async getLinkWithAutoLevel(
-    alias: string,
-  ): Promise<StuLinkInfo | null> {
+  private async getLinkWithAutoLevel(alias: string): Promise<StuLinkInfo | null> {
     const cached = await this.getCachedLink(alias);
     if (cached) {
       return cached;
@@ -149,7 +136,8 @@ export class StuService {
 
     const row = await this.stuRepository.findLinkByAlias(alias);
     if (!row) {
-      await this.redisService.getClient().del(this.linkCacheKey(alias));
+      const version = await this.getCacheVersion();
+      await this.redisService.getClient().del(this.linkCacheKey(alias, version));
       return null;
     }
 
@@ -175,14 +163,16 @@ export class StuService {
       redirectSettings,
     };
 
-    await this.setCachedJson(this.linkCacheKey(alias), linkInfo);
+    const version = await this.getCacheVersion();
+    await this.setCachedJson(this.linkCacheKey(alias, version), linkInfo);
     return linkInfo;
   }
 
   private async findLevelCached(
     levelId: number,
   ): Promise<{ id: number; redirect_settings: unknown } | null> {
-    const cacheKey = this.levelCacheKey(levelId);
+    const version = await this.getCacheVersion();
+    const cacheKey = this.levelCacheKey(levelId, version);
     const cached = await this.getCachedJson<{
       id: number;
       redirect_settings: unknown;
@@ -201,10 +191,7 @@ export class StuService {
     return level;
   }
 
-  private determineRedirectUrl(
-    linkInfo: StuLinkInfo,
-    userContext: StuUserContext,
-  ): string | null {
+  private determineRedirectUrl(linkInfo: StuLinkInfo, userContext: StuUserContext): string | null {
     const config = this.parseRedirectConfig(linkInfo.redirectSettings);
     const rule = this.getMatchedRule(config, userContext);
     const link = typeof rule?.link === 'string' ? rule.link.trim() : '';
@@ -221,6 +208,10 @@ export class StuService {
   }
 
   private parseRedirectConfig(value: unknown): StuRedirectConfig | null {
+    if (Array.isArray(value)) {
+      return { rules: value } as StuRedirectConfig;
+    }
+
     if (this.isRecord(value)) {
       return value as StuRedirectConfig;
     }
@@ -231,19 +222,17 @@ export class StuService {
 
     try {
       const parsed = JSON.parse(value) as unknown;
+      if (Array.isArray(parsed)) {
+        return { rules: parsed } as StuRedirectConfig;
+      }
       return this.isRecord(parsed) ? (parsed as StuRedirectConfig) : null;
     } catch (error) {
-      this.logger.warn(
-        `Invalid STU redirect_settings JSON: ${(error as Error).message}`,
-      );
+      this.logger.warn(`Invalid STU redirect_settings JSON: ${(error as Error).message}`);
       return null;
     }
   }
 
-  private isMatched(
-    userContext: StuUserContext,
-    conditionGroup: Record<string, unknown>,
-  ): boolean {
+  private isMatched(userContext: StuUserContext, conditionGroup: Record<string, unknown>): boolean {
     let hasActualCondition = false;
 
     for (const [key, allowedValues] of Object.entries(conditionGroup)) {
@@ -266,9 +255,7 @@ export class StuService {
         continue;
       }
 
-      if (
-        !userValue.includes(this.unknownToString(allowedValues).toLowerCase())
-      ) {
+      if (!userValue.includes(this.unknownToString(allowedValues).toLowerCase())) {
         return false;
       }
     }
@@ -291,14 +278,33 @@ export class StuService {
           this.userContextTtlSeconds,
         );
     } catch (error) {
-      this.logger.warn(
-        `Failed to cache STU user context: ${(error as Error).message}`,
-      );
+      this.logger.warn(`Failed to cache STU user context: ${(error as Error).message}`);
     }
   }
 
   private async getCachedLink(alias: string): Promise<StuLinkInfo | null> {
-    return this.getCachedJson<StuLinkInfo>(this.linkCacheKey(alias));
+    const version = await this.getCacheVersion();
+    return this.getCachedJson<StuLinkInfo>(this.linkCacheKey(alias, version));
+  }
+
+  private async getCacheVersion(): Promise<string> {
+    const now = Date.now();
+    if (now < this.cacheVersion.expiresAt) {
+      return this.cacheVersion.value;
+    }
+
+    try {
+      const raw = await this.redisService.getClient().get(this.cacheVersionKey);
+      const version = raw && raw.trim().length > 0 ? raw.trim() : '1';
+      this.cacheVersion = {
+        value: version,
+        expiresAt: now + this.cacheVersionTtlMs,
+      };
+      return version;
+    } catch (error) {
+      this.logger.warn(`Failed reading cache version: ${(error as Error).message}`);
+      return this.cacheVersion.value || '1';
+    }
   }
 
   private async getCachedJson<T>(key: string): Promise<T | null> {
@@ -310,9 +316,7 @@ export class StuService {
 
       return JSON.parse(raw) as T;
     } catch (error) {
-      this.logger.warn(
-        `Invalid cache payload for ${key}: ${(error as Error).message}`,
-      );
+      this.logger.warn(`Invalid cache payload for ${key}: ${(error as Error).message}`);
       await this.redisService.getClient().del(key);
       return null;
     }
@@ -324,15 +328,12 @@ export class StuService {
         .getClient()
         .set(key, JSON.stringify(value), 'EX', this.cacheTtlSeconds);
     } catch (error) {
-      this.logger.warn(
-        `Failed writing cache ${key}: ${(error as Error).message}`,
-      );
+      this.logger.warn(`Failed writing cache ${key}: ${(error as Error).message}`);
     }
   }
 
   private extractClientIp(request: Request): string {
-    const forwardedFor =
-      request.header('xx-ip-address') || request.header('x-forwarded-for');
+    const forwardedFor = request.header('xx-ip-address') || request.header('x-forwarded-for');
     if (typeof forwardedFor === 'string' && forwardedFor.length > 0) {
       const firstIp = forwardedFor.split(',')[0];
       return this.sanitizeIp(firstIp || '');
@@ -353,8 +354,12 @@ export class StuService {
   }
 
   private resolveCountry(request: Request, fallback: string): string {
-    const country = request.header('cf-ipcountry') || fallback || 'XX';
-    return country.trim() || 'XX';
+    const headerCountry = request.header('cf-ipcountry') || request.header('xx-country');
+    if (headerCountry) {
+      return headerCountry.trim() || 'XX';
+    }
+
+    return fallback.trim() || 'XX';
   }
 
   private resolveDevice(deviceType: unknown): string {
@@ -408,11 +413,11 @@ export class StuService {
     return typeof value === 'object' && value !== null;
   }
 
-  private linkCacheKey(alias: string): string {
-    return `stu:link:${alias}`;
+  private linkCacheKey(alias: string, version: string): string {
+    return `stu:link:v${version}:${alias}`;
   }
 
-  private levelCacheKey(levelId: number): string {
-    return `stu:level:${levelId}`;
+  private levelCacheKey(levelId: number, version: string): string {
+    return `stu:level:v${version}:${levelId}`;
   }
 }

@@ -11,10 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
 import { StatsQueryDto } from './dto/stats-query.dto';
-import {
-  StatsQueryResponse,
-  TrackingStatsService,
-} from './tracking-stats.service';
+import { StatsQueryResponse, TrackingStatsService } from './tracking-stats.service';
 
 @Controller('internal/stats')
 export class TrackingStatsController {
@@ -39,20 +36,14 @@ export class TrackingStatsController {
     ).trim();
     const inputToken = this.extractToken(request);
 
-    if (
-      !expectedToken ||
-      !inputToken ||
-      !this.isTokenMatched(inputToken, expectedToken)
-    ) {
+    if (!expectedToken || !inputToken || !this.isTokenMatched(inputToken, expectedToken)) {
       throw new UnauthorizedException('Invalid internal token');
     }
   }
 
   private extractToken(request: Request): string {
     const headerToken =
-      request.header('x-internal-token') ||
-      request.header('x-laravel-token') ||
-      '';
+      request.header('x-internal-token') || request.header('x-laravel-token') || '';
 
     if (headerToken.trim()) {
       return headerToken.trim();

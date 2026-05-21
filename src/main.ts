@@ -22,6 +22,15 @@ async function bootstrap(): Promise<void> {
   );
 
   app.set('trust proxy', true);
+  // for dev
+  app.enableCors({
+    origin: true,
+    credentials: true,
+  });
+  // app.enableCors({
+  //   origin: ['http://localhost:8010'],
+  //   credentials: true, // nếu dùng cookie/session
+  // });
 
   const port = Number(process.env.PORT || 3000);
   await app.listen(port);

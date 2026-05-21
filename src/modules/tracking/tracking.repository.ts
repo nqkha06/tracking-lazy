@@ -41,8 +41,7 @@ export class TrackingRepository {
   private readonly metricSqlMap: Record<StatsMetricField, string> = {
     views: 'COUNT(*)',
     revenue: 'COALESCE(SUM(logs.revenue), 0)',
-    earn_views:
-      'COALESCE(SUM(CASE WHEN logs.is_earn = 1 THEN 1 ELSE 0 END), 0)',
+    earn_views: 'COALESCE(SUM(CASE WHEN logs.is_earn = 1 THEN 1 ELSE 0 END), 0)',
     unique_users: 'COUNT(DISTINCT logs.user_id)',
     unique_ips: 'COUNT(DISTINCT logs.ip_address)',
   };
@@ -57,9 +56,7 @@ export class TrackingRepository {
     private readonly dataSource: DataSource,
   ) {}
 
-  async bulkInsertDailyAccessLogs(
-    payloads: AccessLogQueuePayload[],
-  ): Promise<void> {
+  async bulkInsertDailyAccessLogs(payloads: AccessLogQueuePayload[]): Promise<void> {
     if (!payloads.length) {
       return;
     }
@@ -98,22 +95,15 @@ export class TrackingRepository {
     return !!row;
   }
 
-  async migrateDailyLogsToMain(
-    beforeDate: Date,
-    batchSize: number,
-  ): Promise<number> {
+  async migrateDailyLogsToMain(beforeDate: Date, batchSize: number): Promise<number> {
     const queryRunner = this.dataSource.createQueryRunner();
 
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      const mainTable = this.quoteTableName(
-        this.accessLogRepository.metadata.tableName,
-      );
-      const dailyTable = this.quoteTableName(
-        this.accessLogDailyRepository.metadata.tableName,
-      );
+      const mainTable = this.quoteTableName(this.accessLogRepository.metadata.tableName);
+      const dailyTable = this.quoteTableName(this.accessLogDailyRepository.metadata.tableName);
 
       const rows = (await queryRunner.query(
         `SELECT id
@@ -181,9 +171,7 @@ export class TrackingRepository {
     }
   }
 
-  async queryStatsSummary(
-    filters: StatsQueryFilterInput,
-  ): Promise<StatsSummary> {
+  async queryStatsSummary(filters: StatsQueryFilterInput): Promise<StatsSummary> {
     const params: Array<string | number> = [];
     const datasetSql = this.buildStatsDatasetSql(params, filters);
     const whereClause = this.buildStatsWhereClause(filters, params);
@@ -221,9 +209,7 @@ export class TrackingRepository {
     };
   }
 
-  async queryStatsRows(
-    filters: StatsQueryFilterInput,
-  ): Promise<StatsGroupedRow[]> {
+  async queryStatsRows(filters: StatsQueryFilterInput): Promise<StatsGroupedRow[]> {
     const params: Array<string | number> = [];
     const datasetSql = this.buildStatsDatasetSql(params, filters);
     const whereClause = this.buildStatsWhereClause(filters, params);
@@ -282,11 +268,7 @@ export class TrackingRepository {
     return this.toNumber(rows[0]?.total_rows);
   }
 
-  async ensureUserAgent(
-    hash: string,
-    raw: string,
-    deviceType: number,
-  ): Promise<void> {
+  async ensureUserAgent(hash: string, raw: string, deviceType: number): Promise<void> {
     await this.userAgentRepository
       .createQueryBuilder()
       .insert()
@@ -323,9 +305,7 @@ export class TrackingRepository {
 
       if (typeof rawValue === 'string') {
         const asNumber = Number(rawValue);
-        mapped[key] = Number.isFinite(asNumber)
-          ? this.formatNumericValue(key, asNumber)
-          : rawValue;
+        mapped[key] = Number.isFinite(asNumber) ? this.formatNumericValue(key, asNumber) : rawValue;
         continue;
       }
 
@@ -365,11 +345,7 @@ export class TrackingRepository {
 
   private buildUtcDayRange(targetDate: Date): { start: Date; end: Date } {
     const start = new Date(
-      Date.UTC(
-        targetDate.getUTCFullYear(),
-        targetDate.getUTCMonth(),
-        targetDate.getUTCDate(),
-      ),
+      Date.UTC(targetDate.getUTCFullYear(), targetDate.getUTCMonth(), targetDate.getUTCDate()),
     );
 
     const end = new Date(start.getTime() + 86400 * 1000);
@@ -385,22 +361,11 @@ export class TrackingRepository {
     params: Array<string | number>,
     filters: StatsQueryFilterInput,
   ): string {
-    const mainTable = this.quoteTableName(
-      this.accessLogRepository.metadata.tableName,
-    );
-    const dailyTable = this.quoteTableName(
-      this.accessLogDailyRepository.metadata.tableName,
-    );
-    const userAgentTable = this.quoteTableName(
-      this.userAgentRepository.metadata.tableName,
-    );
+    const mainTable = this.quoteTableName(this.accessLogRepository.metadata.tableName);
+    const dailyTable = this.quoteTableName(this.accessLogDailyRepository.metadata.tableName);
+    const userAgentTable = this.quoteTableName(this.userAgentRepository.metadata.tableName);
 
-    params.push(
-      filters.startAt,
-      filters.endExclusive,
-      filters.startAt,
-      filters.endExclusive,
-    );
+    params.push(filters.startAt, filters.endExclusive, filters.startAt, filters.endExclusive);
 
     return `(
       SELECT
@@ -468,9 +433,7 @@ export class TrackingRepository {
     const sqlField = this.dataFieldSqlMap[condition.field];
 
     if (condition.operator === 'IN' || condition.operator === 'NOT IN') {
-      const values = Array.isArray(condition.value)
-        ? condition.value
-        : [condition.value];
+      const values = Array.isArray(condition.value) ? condition.value : [condition.value];
 
       if (!values.length) {
         return;
@@ -482,13 +445,8 @@ export class TrackingRepository {
       return;
     }
 
-    if (
-      condition.operator === 'BETWEEN' ||
-      condition.operator === 'NOT BETWEEN'
-    ) {
-      const values = Array.isArray(condition.value)
-        ? condition.value
-        : [condition.value];
+    if (condition.operator === 'BETWEEN' || condition.operator === 'NOT BETWEEN') {
+      const values = Array.isArray(condition.value) ? condition.value : [condition.value];
 
       if (values.length !== 2) {
         return;

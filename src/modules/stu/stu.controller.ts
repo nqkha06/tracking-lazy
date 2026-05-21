@@ -1,12 +1,4 @@
-import {
-  Controller,
-  Get,
-  HttpStatus,
-  NotFoundException,
-  Param,
-  Req,
-  Res,
-} from '@nestjs/common';
+import { Controller, Get, HttpStatus, NotFoundException, Param, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { StuService } from './stu.service';
 

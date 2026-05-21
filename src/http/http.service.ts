@@ -42,15 +42,10 @@ export class HttpService {
       }
     }
 
-    throw (
-      lastError ?? new Error(`HTTP POST failed after ${maxRetries} attempts`)
-    );
+    throw lastError ?? new Error(`HTTP POST failed after ${maxRetries} attempts`);
   }
 
-  async getWithRetry<TResponse>(
-    url: string,
-    maxRetries = 3,
-  ): Promise<TResponse> {
+  async getWithRetry<TResponse>(url: string, maxRetries = 3): Promise<TResponse> {
     let attempt = 0;
     let lastError: Error | undefined;
 

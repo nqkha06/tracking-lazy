@@ -10,10 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import {
-  STATS_GROUP_BY_VALUES,
-  STATS_ORDER_DIRECTION_VALUES,
-} from '../tracking.types';
+import { STATS_GROUP_BY_VALUES, STATS_ORDER_DIRECTION_VALUES } from '../tracking.types';
 
 const toInt = (value: unknown): number | undefined => {
   if (value === undefined || value === null || value === '') {

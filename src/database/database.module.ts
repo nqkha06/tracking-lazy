@@ -5,10 +5,7 @@ import { AccessLogDailyEntity } from '../entities/access-log-daily.entity';
 import { AccessLogEntity } from '../entities/access-log.entity';
 import { UserAgentEntity } from '../entities/user-agent.entity';
 
-function parseBoolean(
-  value: string | undefined,
-  defaultValue: boolean,
-): boolean {
+function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
   if (value === undefined) {
     return defaultValue;
   }
@@ -54,10 +51,7 @@ function parseBoolean(
           configService.get<string>('DB_TIMEZONE', 'Z'),
         ),
         entities: [],
-        synchronize: parseBoolean(
-          configService.get<string>('A_DB_SYNC'),
-          false,
-        ),
+        synchronize: parseBoolean(configService.get<string>('A_DB_SYNC'), false),
         logging: parseBoolean(configService.get<string>('A_DB_LOGGING'), false),
         extra: {
           connectionLimit: configService.get<number>('A_DB_POOL_SIZE', 50),

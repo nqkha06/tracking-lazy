@@ -216,38 +216,29 @@ export class TrackingStatsService {
     },
   };
 
-  private readonly metricFieldRules: Record<StatsMetricField, StatsMetricRule> =
-    {
-      views: { aliases: ['views', 'view'] },
-      revenue: { aliases: ['revenue', 'sum_revenue'] },
-      earn_views: { aliases: ['earn_views', 'earnviews'] },
-      unique_users: { aliases: ['unique_users', 'uniqueusers'] },
-      unique_ips: { aliases: ['unique_ips', 'uniqueips'] },
-    };
+  private readonly metricFieldRules: Record<StatsMetricField, StatsMetricRule> = {
+    views: { aliases: ['views', 'view'] },
+    revenue: { aliases: ['revenue', 'sum_revenue'] },
+    earn_views: { aliases: ['earn_views', 'earnviews'] },
+    unique_users: { aliases: ['unique_users', 'uniqueusers'] },
+    unique_ips: { aliases: ['unique_ips', 'uniqueips'] },
+  };
 
   private readonly dateFields = new Set<StatsDataField>(
-    STATS_DATA_FIELD_VALUES.filter(
-      (field) => this.dataFieldRules[field].type === 'date',
-    ),
+    STATS_DATA_FIELD_VALUES.filter((field) => this.dataFieldRules[field].type === 'date'),
   );
 
   private readonly filterableFields = new Set<StatsDataField>(
-    STATS_DATA_FIELD_VALUES.filter(
-      (field) => this.dataFieldRules[field].filterable,
-    ),
+    STATS_DATA_FIELD_VALUES.filter((field) => this.dataFieldRules[field].filterable),
   );
 
   private readonly selectableFields = new Set<StatsSelectableField>([
-    ...STATS_DATA_FIELD_VALUES.filter(
-      (field) => this.dataFieldRules[field].selectable,
-    ),
+    ...STATS_DATA_FIELD_VALUES.filter((field) => this.dataFieldRules[field].selectable),
     ...STATS_METRIC_FIELD_VALUES,
   ]);
 
   private readonly relationFields = new Set<StatsDataField>(
-    STATS_DATA_FIELD_VALUES.filter(
-      (field) => this.dataFieldRules[field].relation !== undefined,
-    ),
+    STATS_DATA_FIELD_VALUES.filter((field) => this.dataFieldRules[field].relation !== undefined),
   );
 
   private readonly selectableAliasMap = new Map<string, StatsSelectableField>();
@@ -257,10 +248,7 @@ export class TrackingStatsService {
     private readonly configService: ConfigService,
     private readonly trackingRepository: TrackingRepository,
   ) {
-    this.maxQueryDays = this.configService.get<number>(
-      'STATS_QUERY_MAX_DAYS',
-      93,
-    );
+    this.maxQueryDays = this.configService.get<number>('STATS_QUERY_MAX_DAYS', 93);
 
     this.buildAliasMaps();
   }
@@ -269,25 +257,12 @@ export class TrackingStatsService {
     const range = this.resolveCreatedRange(query);
     const groupFields = this.resolveRequestedGroupFields(query);
     const aggregate = groupFields.length > 0;
-    const selectFields = this.resolveSelectFields(
-      query.select,
-      groupFields,
-      aggregate,
-    );
-    this.assertSelectFieldsCompatibleWithMode(
-      selectFields,
-      groupFields,
-      aggregate,
-    );
+    const selectFields = this.resolveSelectFields(query.select, groupFields, aggregate);
+    this.assertSelectFieldsCompatibleWithMode(selectFields, groupFields, aggregate);
     const limit = query.limit ?? this.defaultLimit;
     const page = query.page ?? this.defaultPage;
     const offset = (page - 1) * limit;
-    const orderBy = this.resolveOrderBy(
-      query.orderBy,
-      selectFields,
-      groupFields,
-      aggregate,
-    );
+    const orderBy = this.resolveOrderBy(query.orderBy, selectFields, groupFields, aggregate);
     const orderDirection = this.resolveOrderDirection(query.orderDirection);
 
     const rawConditions = [
@@ -392,22 +367,15 @@ export class TrackingStatsService {
     createdTo: string;
   } {
     if (query.createdAtFrom && query.createdAtTo) {
-      const fromParsed = this.parseTemporalInput(
-        query.createdAtFrom,
-        'createdAtFrom',
-      );
-      const toParsed = this.parseTemporalInput(
-        query.createdAtTo,
-        'createdAtTo',
-      );
+      const fromParsed = this.parseTemporalInput(query.createdAtFrom, 'createdAtFrom');
+      const toParsed = this.parseTemporalInput(query.createdAtTo, 'createdAtTo');
 
       if (fromParsed.date.getTime() > toParsed.date.getTime()) {
         throw new BadRequestException('createdAtFrom must be <= createdAtTo');
       }
 
       const endExclusive = new Date(
-        toParsed.date.getTime() +
-          (toParsed.precision === 'date' ? 86400000 : 1000),
+        toParsed.date.getTime() + (toParsed.precision === 'date' ? 86400000 : 1000),
       );
 
       this.validateRangeWindow(fromParsed.date, endExclusive);
@@ -428,13 +396,9 @@ export class TrackingStatsService {
       throw new BadRequestException('Invalid time range');
     }
 
-    const days = Math.ceil(
-      (endExclusive.getTime() - start.getTime()) / 86400000,
-    );
+    const days = Math.ceil((endExclusive.getTime() - start.getTime()) / 86400000);
     if (days > this.maxQueryDays) {
-      throw new BadRequestException(
-        `Date range too large. Max ${this.maxQueryDays} days`,
-      );
+      throw new BadRequestException(`Date range too large. Max ${this.maxQueryDays} days`);
     }
   }
 
@@ -462,9 +426,9 @@ export class TrackingStatsService {
     const canonical = this.canonicalizeFilterField(value);
     if (!canonical) {
       throw new BadRequestException(
-        `Unsupported ${source} field: ${value}. Allowed: ${Array.from(
-          this.filterableFields,
-        ).join(', ')}`,
+        `Unsupported ${source} field: ${value}. Allowed: ${Array.from(this.filterableFields).join(
+          ', ',
+        )}`,
       );
     }
 
@@ -518,24 +482,22 @@ export class TrackingStatsService {
 
       if (!canonical) {
         throw new BadRequestException(
-          `Unsupported select field: ${token}. Allowed: ${Array.from(
-            this.selectableFields,
-          ).join(', ')}`,
+          `Unsupported select field: ${token}. Allowed: ${Array.from(this.selectableFields).join(
+            ', ',
+          )}`,
         );
       }
 
       const normalizedCanonical =
-        aggregate &&
-        canonical === 'created_at' &&
-        requestedGroups.includes('date')
+        aggregate && canonical === 'created_at' && requestedGroups.includes('date')
           ? ('date' as StatsSelectableField)
           : canonical;
 
       if (aggregate && !this.selectableFields.has(normalizedCanonical)) {
         throw new BadRequestException(
-          `Unsupported select field: ${token}. Allowed: ${Array.from(
-            this.selectableFields,
-          ).join(', ')}`,
+          `Unsupported select field: ${token}. Allowed: ${Array.from(this.selectableFields).join(
+            ', ',
+          )}`,
         );
       }
 
@@ -551,9 +513,7 @@ export class TrackingStatsService {
     }
 
     if (!resolved.length) {
-      return aggregate
-        ? [...this.defaultAggregateSelectFields]
-        : [...this.defaultRawSelectFields];
+      return aggregate ? [...this.defaultAggregateSelectFields] : [...this.defaultRawSelectFields];
     }
 
     return resolved;
@@ -596,9 +556,9 @@ export class TrackingStatsService {
 
       if (!canonical || !this.selectableFields.has(canonical)) {
         throw new BadRequestException(
-          `Unsupported order_by: ${orderByValue}. Allowed: ${Array.from(
-            this.selectableFields,
-          ).join(', ')}`,
+          `Unsupported order_by: ${orderByValue}. Allowed: ${Array.from(this.selectableFields).join(
+            ', ',
+          )}`,
         );
       }
 
@@ -647,9 +607,7 @@ export class TrackingStatsService {
       .trim()
       .toLowerCase();
 
-    if (
-      STATS_ORDER_DIRECTION_VALUES.includes(normalized as StatsOrderDirection)
-    ) {
+    if (STATS_ORDER_DIRECTION_VALUES.includes(normalized as StatsOrderDirection)) {
       return normalized as StatsOrderDirection;
     }
 
@@ -721,15 +679,10 @@ export class TrackingStatsService {
     return parsed.map((item, index) => this.normalizeRawCondition(item, index));
   }
 
-  private normalizeRawCondition(
-    value: unknown,
-    index: number,
-  ): StatsRawCondition {
+  private normalizeRawCondition(value: unknown, index: number): StatsRawCondition {
     if (Array.isArray(value)) {
       if (value.length < 3) {
-        throw new BadRequestException(
-          `where[${index}] must be [field, operator, value]`,
-        );
+        throw new BadRequestException(`where[${index}] must be [field, operator, value]`);
       }
 
       return {
@@ -751,28 +704,17 @@ export class TrackingStatsService {
       };
     }
 
-    throw new BadRequestException(
-      `where[${index}] must be object or [field, operator, value]`,
-    );
+    throw new BadRequestException(`where[${index}] must be object or [field, operator, value]`);
   }
 
-  private normalizeCondition(
-    condition: StatsRawCondition,
-    index: number,
-  ): StatsFilterCondition {
+  private normalizeCondition(condition: StatsRawCondition, index: number): StatsFilterCondition {
     const field = this.canonicalizeFilterField(condition.field);
     if (!field || !this.filterableFields.has(field)) {
-      throw new BadRequestException(
-        `where[${index}] unsupported field: ${condition.field}`,
-      );
+      throw new BadRequestException(`where[${index}] unsupported field: ${condition.field}`);
     }
 
     const operator = this.normalizeOperator(condition.operator, index);
-    const value = this.normalizeConditionValue(
-      field,
-      operator,
-      condition.value,
-    );
+    const value = this.normalizeConditionValue(field, operator, condition.value);
 
     return {
       field,
@@ -784,16 +726,10 @@ export class TrackingStatsService {
   private normalizeOperator(value: string, index: number): StatsFilterOperator {
     const normalized = value.trim().toUpperCase().replace(/\s+/g, ' ');
     const mapped =
-      normalized === 'NOT_IN'
-        ? 'NOT IN'
-        : normalized === 'NOT_LIKE'
-          ? 'NOT LIKE'
-          : normalized;
+      normalized === 'NOT_IN' ? 'NOT IN' : normalized === 'NOT_LIKE' ? 'NOT LIKE' : normalized;
 
     if (!STATS_FILTER_OPERATOR_VALUES.includes(mapped as StatsFilterOperator)) {
-      throw new BadRequestException(
-        `where[${index}] unsupported operator: ${value}`,
-      );
+      throw new BadRequestException(`where[${index}] unsupported operator: ${value}`);
     }
 
     return mapped as StatsFilterOperator;
@@ -819,10 +755,7 @@ export class TrackingStatsService {
         throw new BadRequestException(`${operator} requires exactly 2 values`);
       }
 
-      return [
-        this.normalizeScalarValue(field, list[0]),
-        this.normalizeScalarValue(field, list[1]),
-      ];
+      return [this.normalizeScalarValue(field, list[0]), this.normalizeScalarValue(field, list[1])];
     }
 
     return this.normalizeScalarValue(field, value);
@@ -844,18 +777,13 @@ export class TrackingStatsService {
       .filter((item) => item.length > 0);
   }
 
-  private normalizeScalarValue(
-    field: StatsDataField,
-    value: unknown,
-  ): string | number {
+  private normalizeScalarValue(field: StatsDataField, value: unknown): string | number {
     const type = this.dataFieldRules[field].type;
 
     if (type === 'number') {
       const parsed = Number(value);
       if (!Number.isFinite(parsed)) {
-        throw new BadRequestException(
-          `Filter value for ${field} must be numeric`,
-        );
+        throw new BadRequestException(`Filter value for ${field} must be numeric`);
       }
 
       return parsed;
@@ -863,22 +791,16 @@ export class TrackingStatsService {
 
     if (type === 'date') {
       if (field === 'date') {
-        return toMysqlDateTime(
-          this.parseDateOnlyUtc(String(value), field),
-        ).slice(0, 10);
+        return toMysqlDateTime(this.parseDateOnlyUtc(String(value), field)).slice(0, 10);
       }
 
-      return toMysqlDateTime(
-        this.parseTemporalInput(String(value), field).date,
-      );
+      return toMysqlDateTime(this.parseTemporalInput(String(value), field).date);
     }
 
     return String(value ?? '').trim();
   }
 
-  private canonicalizeSelectableField(
-    value: string,
-  ): StatsSelectableField | null {
+  private canonicalizeSelectableField(value: string): StatsSelectableField | null {
     const token = this.normalizeToken(value);
     return this.selectableAliasMap.get(token) || null;
   }
@@ -896,9 +818,7 @@ export class TrackingStatsService {
     return STATS_DATA_FIELD_VALUES.includes(field as StatsDataField);
   }
 
-  private isMetricField(
-    field: StatsSelectableField,
-  ): field is StatsMetricField {
+  private isMetricField(field: StatsSelectableField): field is StatsMetricField {
     return STATS_METRIC_FIELD_VALUES.includes(field as StatsMetricField);
   }
 
@@ -937,12 +857,9 @@ export class TrackingStatsService {
       };
     }
 
-    const dateTime =
-      /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(trimmed);
+    const dateTime = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(trimmed);
     if (!dateTime) {
-      throw new BadRequestException(
-        `${fieldName} must be YYYY-MM-DD or YYYY-MM-DD HH:mm:ss`,
-      );
+      throw new BadRequestException(`${fieldName} must be YYYY-MM-DD or YYYY-MM-DD HH:mm:ss`);
     }
 
     const year = Number(dateTime[1]);
@@ -951,9 +868,7 @@ export class TrackingStatsService {
     const hour = Number(dateTime[4]);
     const minute = Number(dateTime[5]);
     const second = Number(dateTime[6]);
-    const parsed = new Date(
-      Date.UTC(year, month - 1, day, hour, minute, second),
-    );
+    const parsed = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
 
     if (
       parsed.getUTCFullYear() !== year ||

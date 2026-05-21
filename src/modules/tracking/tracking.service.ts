@@ -3,11 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { type ChainableCommander } from 'ioredis';
 import { HttpService } from '../../http/http.service';
 import { RedisService } from '../../redis/redis.service';
-import {
-  DEVICE_CODE,
-  detectDevice,
-  sanitizeUserAgent,
-} from '../../utils/device.util';
+import { DEVICE_CODE, detectDevice, sanitizeUserAgent } from '../../utils/device.util';
 import {
   buildDetectionMask,
   formatMinuteKey,
@@ -37,6 +33,9 @@ export class TrackingService {
   private readonly dedupeTtlSeconds: number;
   private readonly detailLinkEndpoint: string;
   private readonly linkDetailCacheTtlSeconds: number;
+  private readonly cacheVersionKey: string;
+  private readonly cacheVersionTtlMs: number;
+  private cacheVersion = { value: '1', expiresAt: 0 };
 
   constructor(
     private readonly configService: ConfigService,
@@ -44,14 +43,8 @@ export class TrackingService {
     private readonly redisService: RedisService,
     private readonly trackingRepository: TrackingRepository,
   ) {
-    this.logsQueueKey = this.configService.get<string>(
-      'LOGS_QUEUE_KEY',
-      'logs_queue',
-    );
-    this.dedupeTtlSeconds = this.configService.get<number>(
-      'VISIT_DEDUPE_TTL_SECONDS',
-      86400,
-    );
+    this.logsQueueKey = this.configService.get<string>('LOGS_QUEUE_KEY', 'logs_queue');
+    this.dedupeTtlSeconds = this.configService.get<number>('VISIT_DEDUPE_TTL_SECONDS', 86400);
     this.detailLinkEndpoint = (
       this.configService.get<string>('DETAIL_LINK_ENDPOINT', '') || ''
     ).trim();
@@ -59,6 +52,15 @@ export class TrackingService {
       'LINK_DETAIL_CACHE_TTL_SECONDS',
       60,
     );
+    this.cacheVersionKey = this.configService.get<string>(
+      'STU_CACHE_VERSION_KEY',
+      'stu:cache:version',
+    );
+    const cacheVersionTtlSeconds = this.configService.get<number>(
+      'STU_CACHE_VERSION_TTL_SECONDS',
+      30,
+    );
+    this.cacheVersionTtlMs = Math.max(1, cacheVersionTtlSeconds) * 1000;
   }
 
   async trackVisit(
@@ -155,21 +157,17 @@ export class TrackingService {
     );
 
     const rateConfig = this.resolveRateConfig(link.rates, country);
-    const payout =
-      device === 'mobile'
-        ? rateConfig.payout.mobile
-        : rateConfig.payout.desktop;
+    const payout = device === 'mobile' ? rateConfig.payout.mobile : rateConfig.payout.desktop;
     let revenue = isFirstVisit ? payout / 1000 : 0;
     let isEarn = isFirstVisit ? 1 : 0;
 
     if (isFirstVisit) {
       try {
-        const existedToday =
-          await this.trackingRepository.existsTodayInDailyLogs(
-            link.link_id,
-            normalizedIp,
-            now,
-          );
+        const existedToday = await this.trackingRepository.existsTodayInDailyLogs(
+          link.link_id,
+          normalizedIp,
+          now,
+        );
 
         if (existedToday) {
           revenue = 0;
@@ -232,13 +230,7 @@ export class TrackingService {
     };
 
     const pipeline = this.redisService.createPipeline();
-    this.updateRealtimeStats(
-      pipeline,
-      minuteKey,
-      link.link_id,
-      link.user_id,
-      revenue,
-    );
+    this.updateRealtimeStats(pipeline, minuteKey, link.link_id, link.user_id, revenue);
     pipeline.lpush(this.logsQueueKey, JSON.stringify(payload));
     await pipeline.exec();
 
@@ -260,7 +252,7 @@ export class TrackingService {
       return null;
     }
 
-    const cacheKey = this.buildLinkCacheKey(alias, country);
+    const cacheKey = await this.buildLinkCacheKey(alias, country);
     try {
       const cached = await this.redisService.getClient().get(cacheKey);
       if (cached) {
@@ -273,9 +265,7 @@ export class TrackingService {
         await this.redisService.getClient().del(cacheKey);
       }
     } catch (error) {
-      this.logger.warn(
-        `Failed reading link cache for alias ${alias}: ${(error as Error).message}`,
-      );
+      this.logger.warn(`Failed reading link cache for alias ${alias}: ${(error as Error).message}`);
     }
 
     const requestUrl = this.buildDetailLinkUrl(alias);
@@ -285,9 +275,7 @@ export class TrackingService {
       const link = this.parseLinkDetailPayload(response);
 
       if (!link) {
-        this.logger.warn(
-          `Invalid link detail payload for alias ${alias} from ${requestUrl}`,
-        );
+        this.logger.warn(`Invalid link detail payload for alias ${alias} from ${requestUrl}`);
 
         return null;
       }
@@ -295,12 +283,7 @@ export class TrackingService {
       try {
         await this.redisService
           .getClient()
-          .set(
-            cacheKey,
-            JSON.stringify(link),
-            'EX',
-            this.linkDetailCacheTtlSeconds,
-          );
+          .set(cacheKey, JSON.stringify(link), 'EX', this.linkDetailCacheTtlSeconds);
       } catch (cacheError) {
         this.logger.warn(
           `Failed writing link cache for alias ${alias}: ${(cacheError as Error).message}`,
@@ -330,9 +313,7 @@ export class TrackingService {
   }
 
   private async enqueueLog(payload: AccessLogQueuePayload): Promise<void> {
-    await this.redisService
-      .getClient()
-      .lpush(this.logsQueueKey, JSON.stringify(payload));
+    await this.redisService.getClient().lpush(this.logsQueueKey, JSON.stringify(payload));
   }
 
   private async ensureUserAgentCached(
@@ -342,30 +323,20 @@ export class TrackingService {
   ): Promise<void> {
     try {
       const cacheKey = `ua:known:${hash}`;
-      const isFirstSeen = await this.redisService.setNxWithExpiry(
-        cacheKey,
-        '1',
-        86400 * 30,
-      );
+      const isFirstSeen = await this.redisService.setNxWithExpiry(cacheKey, '1', 86400 * 30);
 
       if (!isFirstSeen) {
         return;
       }
 
-      await this.trackingRepository.ensureUserAgent(
-        hash,
-        raw || 'unknown',
-        deviceType,
-      );
+      await this.trackingRepository.ensureUserAgent(hash, raw || 'unknown', deviceType);
     } catch (error) {
-      this.logger.warn(
-        `Unable to cache user-agent hash ${hash}: ${(error as Error).message}`,
-      );
+      this.logger.warn(`Unable to cache user-agent hash ${hash}: ${(error as Error).message}`);
     }
   }
 
   private sanitizeIp(ip: string): string {
-    return "123.23.2.29";
+    return '123.23.2.29';
     const trimmed = (ip || '').trim();
     if (!trimmed) {
       return '0.0.0.0';
@@ -379,9 +350,30 @@ export class TrackingService {
     return this.detailLinkEndpoint.replace(/\{alias\}/g, encodedAlias);
   }
 
-  private buildLinkCacheKey(alias: string, country?: string): string {
+  private async buildLinkCacheKey(alias: string, country?: string): Promise<string> {
+    const version = await this.getCacheVersion();
     const normalizedCountry = sanitizeCountry(country || 'UNK');
-    return `link:detail:${sanitizeAlias(alias)}:${normalizedCountry}`;
+    return `link:detail:v${version}:${sanitizeAlias(alias)}:${normalizedCountry}`;
+  }
+
+  private async getCacheVersion(): Promise<string> {
+    const now = Date.now();
+    if (now < this.cacheVersion.expiresAt) {
+      return this.cacheVersion.value;
+    }
+
+    try {
+      const raw = await this.redisService.getClient().get(this.cacheVersionKey);
+      const version = raw && raw.trim().length > 0 ? raw.trim() : '1';
+      this.cacheVersion = {
+        value: version,
+        expiresAt: now + this.cacheVersionTtlMs,
+      };
+      return version;
+    } catch (error) {
+      this.logger.warn(`Failed reading cache version: ${(error as Error).message}`);
+      return this.cacheVersion.value || '1';
+    }
   }
 
   private parseLinkDetailPayload(payload: unknown): LinkData | null {
@@ -392,21 +384,11 @@ export class TrackingService {
     const linkId = this.toNumber(payload.link_id);
     const userId = this.toNumber(payload.user_id);
     const levelId = this.toNumber(payload.level_id);
-    const status =
-      typeof payload.status === 'string'
-        ? payload.status.trim().toLowerCase()
-        : '';
+    const status = typeof payload.status === 'string' ? payload.status.trim().toLowerCase() : '';
     const rates = this.parseLinkRates(payload.rates);
     const tier = this.parseLinkTier(payload.tier);
 
-    if (
-      linkId === null ||
-      userId === null ||
-      levelId === null ||
-      !status ||
-      !rates ||
-      !tier
-    ) {
+    if (linkId === null || userId === null || levelId === null || !status || !rates || !tier) {
       return null;
     }
 
@@ -502,10 +484,7 @@ export class TrackingService {
     };
   }
 
-  private resolveRateConfig(
-    rates: LinkRates,
-    country?: string,
-  ): LinkRateConfig {
+  private resolveRateConfig(rates: LinkRates, country?: string): LinkRateConfig {
     const countryCode = sanitizeCountry(country || 'UNK');
     return rates.countries[countryCode] || rates.default;
   }

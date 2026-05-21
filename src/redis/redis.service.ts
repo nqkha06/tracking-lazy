@@ -35,11 +35,7 @@ export class RedisService implements OnModuleDestroy {
     return this.client.pipeline();
   }
 
-  async setNxWithExpiry(
-    key: string,
-    value: string,
-    ttlSeconds: number,
-  ): Promise<boolean> {
+  async setNxWithExpiry(key: string, value: string, ttlSeconds: number): Promise<boolean> {
     const result = await this.client.set(key, value, 'EX', ttlSeconds, 'NX');
     return result === 'OK';
   }
@@ -70,13 +66,7 @@ export class RedisService implements OnModuleDestroy {
     const keys: string[] = [];
 
     do {
-      const [nextCursor, found] = await this.client.scan(
-        cursor,
-        'MATCH',
-        pattern,
-        'COUNT',
-        count,
-      );
+      const [nextCursor, found] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', count);
       cursor = nextCursor;
       keys.push(...found);
     } while (cursor !== '0');
@@ -96,11 +86,7 @@ export class RedisService implements OnModuleDestroy {
     return this.client.del(...keys);
   }
 
-  async acquireLock(
-    key: string,
-    token: string,
-    ttlMs: number,
-  ): Promise<boolean> {
+  async acquireLock(key: string, token: string, ttlMs: number): Promise<boolean> {
     const result = await this.client.set(key, token, 'PX', ttlMs, 'NX');
     return result === 'OK';
   }

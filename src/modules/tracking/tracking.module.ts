@@ -11,19 +11,8 @@ import { TrackingService } from './tracking.service';
 import { TrackingWorker } from './tracking.worker';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([
-      AccessLogEntity,
-      AccessLogDailyEntity,
-      UserAgentEntity,
-    ]),
-  ],
+  imports: [TypeOrmModule.forFeature([AccessLogEntity, AccessLogDailyEntity, UserAgentEntity])],
   controllers: [TrackingController, TrackingStatsController],
-  providers: [
-    TrackingService,
-    TrackingStatsService,
-    TrackingRepository,
-    TrackingWorker,
-  ],
+  providers: [TrackingService, TrackingStatsService, TrackingRepository, TrackingWorker],
 })
 export class TrackingModule {}

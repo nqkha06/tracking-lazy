@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  HttpCode,
-  HttpStatus,
-  Param,
-  Post,
-  Req,
-} from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Param, Get, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { TrackRequestDto } from './dto/track-request.dto';
 import { TrackingService } from './tracking.service';
@@ -26,7 +18,22 @@ export class TrackingController {
     const xxIpAddress = this.extractClientIp(request);
     const xxUa = request.header('xx-ua') || '';
     const xxReferer = request.header('xx-referer') || '';
-    
+
+    return this.trackingService.trackVisit(alias, body, xxIpAddress, xxUa);
+  }
+
+  @Get(':alias')
+  @HttpCode(HttpStatus.OK)
+  async trackGet(@Param('alias') alias: string, @Req() request: Request): Promise<TrackResult> {
+    const xxIpAddress = this.extractClientIp(request);
+    const xxUa = request.header('xx-ua') || '';
+    const xxReferer = request.header('xx-referer') || '';
+    const body: TrackRequestDto = {
+      country: this.getCountryFromHeader(request),
+      adBlock: false,
+      proxyVpn: false,
+      ipChange: false,
+    };
     return this.trackingService.trackVisit(alias, body, xxIpAddress, xxUa);
   }
 
@@ -38,5 +45,10 @@ export class TrackingController {
     }
 
     return request.ip || request.socket.remoteAddress || '0.0.0.0';
+  }
+
+  private getCountryFromHeader(request: Request): string {
+    const country = request.header('CF-IPCountry') || 'XX';
+    return country;
   }
 }
