@@ -3,6 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AccessLogDailyEntity } from '../entities/access-log-daily.entity';
 import { AccessLogEntity } from '../entities/access-log.entity';
+import { NoteAccessLogDailyEntity } from '../entities/note-access-log-daily.entity';
+import { NoteAccessLogEntity } from '../entities/note-access-log.entity';
 import { UserAgentEntity } from '../entities/user-agent.entity';
 
 function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
@@ -27,8 +29,14 @@ function parseBoolean(value: string | undefined, defaultValue: boolean): boolean
         database: configService.get<string>('DB_NAME', 'tracking'),
         charset: 'utf8mb4_unicode_ci',
         timezone: configService.get<string>('DB_TIMEZONE', 'Z'),
-        entities: [AccessLogEntity, AccessLogDailyEntity, UserAgentEntity],
-        synchronize: parseBoolean(configService.get<string>('DB_SYNC'), false),
+        entities: [
+          AccessLogEntity,
+          AccessLogDailyEntity,
+          NoteAccessLogEntity,
+          NoteAccessLogDailyEntity,
+          UserAgentEntity,
+        ],
+        synchronize: true,
         logging: parseBoolean(configService.get<string>('DB_LOGGING'), false),
         extra: {
           connectionLimit: configService.get<number>('DB_POOL_SIZE', 50),

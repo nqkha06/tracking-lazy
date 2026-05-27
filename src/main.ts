@@ -15,12 +15,12 @@ async function bootstrap(): Promise<void> {
       transform: true,
       whitelist: true,
       forbidNonWhitelisted: true,
-      transformOptions: {
-        excludeExtraneousValues: true, // BẮT BUỘC
-      },
+      // transformOptions: {
+      //   excludeExtraneousValues: true, // BẮT BUỘC
+      // },
     }),
   );
-
+  app.set('query parser', 'extended');
   app.set('trust proxy', true);
   // for dev
   app.enableCors({

@@ -3,7 +3,7 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 @Entity({ name: 'note_access_logs_daily' })
 @Index('idx_daily_link_ip_created_at', ['linkId', 'ipAddress', 'createdAt'])
 @Index('idx_daily_created_at', ['createdAt'])
-export class AccessLogDailyEntity {
+export class NoteAccessLogDailyEntity {
   @PrimaryGeneratedColumn({ type: 'bigint', unsigned: true })
   id!: string;
 

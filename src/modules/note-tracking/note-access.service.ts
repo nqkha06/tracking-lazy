@@ -25,10 +25,17 @@ import {
   TrackResult,
 } from './tracking.types';
 import { TrackingRepository } from './tracking.repository';
+import { NoteAccessLogEntity } from 'src/entities/note-access-log.entity';
+import { Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { NoteAccessQueryDto } from './dto/get-note-access-filter.dto';
+
+import { BadRequestException } from '@nestjs/common';
+import { SelectQueryBuilder } from 'typeorm';
 
 @Injectable()
-export class TrackingService {
-  private readonly logger = new Logger(TrackingService.name);
+export class NoteAccessService {
+  private readonly logger = new Logger(NoteAccessService.name);
   private readonly logsQueueKey: string;
   private readonly dedupeTtlSeconds: number;
   private readonly detailLinkEndpoint: string;
@@ -38,6 +45,8 @@ export class TrackingService {
   private cacheVersion = { value: '1', expiresAt: 0 };
 
   constructor(
+    @InjectRepository(NoteAccessLogEntity)
+    private readonly noteAcc: Repository<NoteAccessLogEntity>,
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
     private readonly redisService: RedisService,
@@ -62,7 +71,148 @@ export class TrackingService {
     );
     this.cacheVersionTtlMs = Math.max(1, cacheVersionTtlSeconds) * 1000;
   }
+  async findAll(query: NoteAccessQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
 
+    const qb = this.noteAcc.createQueryBuilder('note_access');
+
+    this.applyFilters(qb, query);
+    this.applyDateRange(qb, query);
+    this.applySorting(qb, query);
+
+    qb.skip(skip).take(limit);
+
+    const [items, total] = await qb.getManyAndCount();
+
+    return {
+      data: items,
+      meta: {
+        page,
+        limit,
+        total,
+        total_pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  private applyFilters(
+    qb: SelectQueryBuilder<NoteAccessLogEntity>,
+    query: NoteAccessQueryDto,
+  ): void {
+    const filters = query.filters;
+
+    if (!filters) {
+      return;
+    }
+
+    if (filters.link_id !== undefined) {
+      qb.andWhere('note_access.linkId = :linkId', {
+        linkId: filters.link_id,
+      });
+    }
+
+    if (filters.user_id !== undefined) {
+      console.log('Applying filters:', filters.user_id);
+
+      qb.andWhere('note_access.userId = :userId', {
+        userId: filters.user_id,
+      });
+    }
+
+    if (filters.country?.length) {
+      qb.andWhere('country IN (:...countries)', {
+        countries: filters.country,
+      });
+    }
+
+    if (filters.device?.length) {
+      qb.andWhere('device IN (:...devices)', {
+        devices: filters.device,
+      });
+    }
+
+    if (filters.is_earn !== undefined) {
+      qb.andWhere('isEarn = :isEarn', {
+        isEarn: filters.is_earn,
+      });
+    }
+
+    if (filters.reject_reason_mask !== undefined) {
+      qb.andWhere('rejectReasonMask = :rejectReasonMask', {
+        rejectReasonMask: filters.reject_reason_mask,
+      });
+    }
+
+    if (filters.ip_address) {
+      qb.andWhere('ipAddress = :ipAddress', {
+        ipAddress: filters.ip_address,
+      });
+    }
+  }
+
+  private applyDateRange(
+    qb: SelectQueryBuilder<NoteAccessLogEntity>,
+    query: NoteAccessQueryDto,
+  ): void {
+    const date = query.date;
+
+    if (!date) {
+      return;
+    }
+
+    if (date.from) {
+      qb.andWhere('note_access.createdAt >= :from', {
+        from: date.from,
+      });
+    }
+
+    if (date.to) {
+      qb.andWhere('note_access.createdAt <= :to', {
+        to: date.to,
+      });
+    }
+  }
+
+  private applySorting(
+    qb: SelectQueryBuilder<NoteAccessLogEntity>,
+    query: NoteAccessQueryDto,
+  ): void {
+    const sort = query.sort;
+
+    const sortMap: Record<string, string> = {
+      id: 'note_access.id',
+      revenue: 'note_access.revenue',
+      created_at: 'note_access.createdAt',
+    };
+
+    if (!sort || Object.keys(sort).length === 0) {
+      qb.orderBy('note_access.createdAt', 'DESC');
+      return;
+    }
+
+    Object.entries(sort).forEach(([field, direction], index) => {
+      const column = sortMap[field];
+
+      if (!column) {
+        throw new BadRequestException(`Invalid sort field: ${field}`);
+      }
+
+      const order = String(direction).toUpperCase();
+
+      if (!['ASC', 'DESC'].includes(order)) {
+        throw new BadRequestException(`Invalid sort direction: ${direction}`);
+      }
+
+      if (index === 0) {
+        qb.orderBy(column, order as 'ASC' | 'DESC');
+        return;
+      }
+
+      qb.addOrderBy(column, order as 'ASC' | 'DESC');
+    });
+  }
   async trackVisit(
     alias: string,
     body: TrackRequestDto,

@@ -4,7 +4,7 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 @Index('idx_link_created_at', ['linkId', 'createdAt'])
 @Index('idx_user_created_at', ['userId', 'createdAt'])
 @Index('idx_ip_created_at', ['ipAddress', 'createdAt'])
-export class AccessLogEntity {
+export class NoteAccessLogEntity {
   @PrimaryGeneratedColumn({ type: 'bigint', unsigned: true })
   id!: string;
 

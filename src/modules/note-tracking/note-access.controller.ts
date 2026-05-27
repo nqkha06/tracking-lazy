@@ -1,12 +1,12 @@
 import { Body, Controller, HttpCode, HttpStatus, Param, Get, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { TrackRequestDto } from './dto/track-request.dto';
-import { TrackingService } from './note-access.service';
+import { NoteAccessService } from './note-access.service';
 import { TrackResult } from './tracking.types';
 
-@Controller('note-cnt')
-export class TrackingController {
-  constructor(private readonly trackingService: TrackingService) {}
+@Controller('n/a')
+export class NoteAccessController {
+  constructor(private readonly trackingService: NoteAccessService) {}
 
   @Post(':alias')
   @HttpCode(HttpStatus.OK)
@@ -14,10 +14,10 @@ export class TrackingController {
     @Param('alias') alias: string,
     @Body() body: TrackRequestDto,
     @Req() request: Request,
-  ): Promise<TrackResult> {
+  ) {
+    return 123;
     const xxIpAddress = this.extractClientIp(request);
     const xxUa = request.header('xx-ua') || '';
-    const xxReferer = request.header('xx-referer') || '';
 
     return this.trackingService.trackVisit(alias, body, xxIpAddress, xxUa);
   }
@@ -27,7 +27,7 @@ export class TrackingController {
   async trackGet(@Param('alias') alias: string, @Req() request: Request): Promise<TrackResult> {
     const xxIpAddress = this.extractClientIp(request);
     const xxUa = request.header('xx-ua') || '';
-    const xxReferer = request.header('xx-referer') || '';
+
     const body: TrackRequestDto = {
       country: this.getCountryFromHeader(request),
       adBlock: false,

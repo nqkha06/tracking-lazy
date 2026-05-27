@@ -9,6 +9,7 @@ import { StuModule } from './modules/stu/stu.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
 import { RedisModule } from './redis/redis.module';
 import { UaParserService } from './ua-parser/ua-parser.service';
+import { NoteAccessModule } from './modules/note-tracking/note-acccess.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { UaParserService } from './ua-parser/ua-parser.service';
     RedisModule,
     HttpModule,
     StuModule,
+    NoteAccessModule,
     TrackingModule,
   ],
   providers: [

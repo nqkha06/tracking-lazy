@@ -4,36 +4,27 @@ import {
   HttpCode,
   HttpStatus,
   Query,
-  Req,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
-import { StatsQueryDto } from './dto/stats-query.dto';
-import { StatsQueryResponse, TrackingStatsService } from './tracking-stats.service';
+import { NoteAccessService } from './note-access.service';
+import { NoteAccessFiltersDto, NoteAccessQueryDto } from './dto/get-note-access-filter.dto';
 
-@Controller('internal/stats')
-export class TrackingStatsController {
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly trackingStatsService: TrackingStatsService,
-  ) {}
+@Controller('internal/n/stats')
+export class NoteQueryController {
+  constructor(private readonly NoteAccessService: NoteAccessService) {}
 
   @Get('query')
   @HttpCode(HttpStatus.OK)
-  async queryByParams(
-    @Query() query: StatsQueryDto,
-    @Req() request: Request,
-  ): Promise<StatsQueryResponse> {
+  async queryByParams(@Query() query: NoteAccessQueryDto) {
+    console.log('Received query:', query);
     // this.assertAuthorized(request);
-    return this.trackingStatsService.queryStats(query);
+    return { success: true, ...await this.NoteAccessService.findAll(query) };
   }
 
   private assertAuthorized(request: Request): void {
-    const expectedToken = (
-      this.configService.get<string>('INTERNAL_STATS_API_TOKEN', '') || ''
-    ).trim();
+    const expectedToken = process.env.LINK4SUB_INTERNAL_SECRET_KEY?.trim();
     const inputToken = this.extractToken(request);
 
     if (!expectedToken || !inputToken || !this.isTokenMatched(inputToken, expectedToken)) {
@@ -42,8 +33,7 @@ export class TrackingStatsController {
   }
 
   private extractToken(request: Request): string {
-    const headerToken =
-      request.header('x-internal-token') || request.header('x-laravel-token') || '';
+    const headerToken = request.header('x-internal-token') || '';
 
     if (headerToken.trim()) {
       return headerToken.trim();

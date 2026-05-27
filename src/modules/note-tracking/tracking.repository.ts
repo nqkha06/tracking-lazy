@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { AccessLogDailyEntity } from '../../entities/access-log-daily.entity';
-import { AccessLogEntity } from '../../entities/access-log.entity';
+import { NoteAccessLogDailyEntity } from '../../entities/note-access-log-daily.entity';
+import { NoteAccessLogEntity } from '../../entities/note-access-log.entity';
 import { UserAgentEntity } from '../../entities/user-agent.entity';
 import { detectBrowser, detectOs } from '../../utils/device.util';
 import { toMysqlDateTime } from '../../utils/detection.util';
@@ -47,10 +47,10 @@ export class TrackingRepository {
   };
 
   constructor(
-    @InjectRepository(AccessLogEntity)
-    private readonly accessLogRepository: Repository<AccessLogEntity>,
-    @InjectRepository(AccessLogDailyEntity)
-    private readonly accessLogDailyRepository: Repository<AccessLogDailyEntity>,
+    @InjectRepository(NoteAccessLogEntity)
+    private readonly accessLogRepository: Repository<NoteAccessLogEntity>,
+    @InjectRepository(NoteAccessLogDailyEntity)
+    private readonly accessLogDailyRepository: Repository<NoteAccessLogDailyEntity>,
     @InjectRepository(UserAgentEntity)
     private readonly userAgentRepository: Repository<UserAgentEntity>,
     private readonly dataSource: DataSource,
@@ -69,7 +69,7 @@ export class TrackingRepository {
       await this.accessLogDailyRepository
         .createQueryBuilder()
         .insert()
-        .into(AccessLogDailyEntity)
+        .into(NoteAccessLogDailyEntity)
         .values(this.mapAccessLogValues(chunk))
         .execute();
     }
