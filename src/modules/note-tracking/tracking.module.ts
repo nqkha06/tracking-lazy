@@ -3,11 +3,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AccessLogDailyEntity } from '../../entities/access-log-daily.entity';
 import { AccessLogEntity } from '../../entities/access-log.entity';
 import { UserAgentEntity } from '../../entities/user-agent.entity';
-import { TrackingController } from './tracking.controller';
+import { TrackingController } from './note-access.controller';
 import { TrackingRepository } from './tracking.repository';
 import { TrackingStatsController } from './tracking-stats.controller';
 import { TrackingStatsService } from './tracking-stats.service';
-import { TrackingService } from './tracking.service';
+import { TrackingService } from './note-access.service';
 import { TrackingWorker } from './tracking.worker';
 
 @Module({

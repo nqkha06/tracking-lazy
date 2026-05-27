@@ -1,4 +1,4 @@
-import { Controller, Get, HttpStatus, NotFoundException, Param, Req, Res } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Param, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { StuService } from './stu.service';
 
@@ -15,7 +15,8 @@ export class StuController {
     const data = await this.stuService.getShowData(alias, request);
 
     if (!data) {
-      throw new NotFoundException('Link not found');
+      response.redirect('https://link4sub.com/404?alias=' + encodeURIComponent(alias));
+      return;
     }
 
     if (!data.redirectUrl) {

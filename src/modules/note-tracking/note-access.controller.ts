@@ -1,7 +1,7 @@
 import { Body, Controller, HttpCode, HttpStatus, Param, Get, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { TrackRequestDto } from './dto/track-request.dto';
-import { TrackingService } from './tracking.service';
+import { TrackingService } from './note-access.service';
 import { TrackResult } from './tracking.types';
 
 @Controller('note-cnt')
