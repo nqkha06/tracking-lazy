@@ -18,7 +18,6 @@ export class NoteQueryController {
   @Get('query')
   @HttpCode(HttpStatus.OK)
   async queryByParams(@Query() query: NoteAccessQueryDto) {
-    console.log('Received query:', query);
     // this.assertAuthorized(request);
     return { success: true, ...await this.NoteAccessService.findAll(query) };
   }
