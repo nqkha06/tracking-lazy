@@ -19,12 +19,13 @@ export class NoteAccessController {
     const xxIpAddress = this.extractClientIp(request);
     const xxUa = request.header('xx-ua') || '';
 
-    return this.trackingService.trackVisit(alias, body, xxIpAddress, xxUa);
   }
 
   @Get(':alias')
   @HttpCode(HttpStatus.OK)
-  async trackGet(@Param('alias') alias: string, @Req() request: Request): Promise<TrackResult> {
+  async trackGet(@Param('alias') alias: string, @Req() request: Request){
+    return 123;
+
     const xxIpAddress = this.extractClientIp(request);
     const xxUa = request.header('xx-ua') || '';
 
@@ -34,7 +35,6 @@ export class NoteAccessController {
       proxyVpn: false,
       ipChange: false,
     };
-    return this.trackingService.trackVisit(alias, body, xxIpAddress, xxUa);
   }
 
   private extractClientIp(request: Request): string {

@@ -63,9 +63,32 @@ export class NoteAccessService {
 
     this.applyFilters(qb, query);
     this.applyDateRange(qb, query);
-    this.applySorting(qb, query);
+    const groupAliases = this.applyGroup(qb, query);
+    if (groupAliases.length === 0) {
+      this.applySelects(qb, query);
+    }
+    this.applySorting(qb, query, groupAliases);
 
     qb.skip(skip).take(limit);
+
+    if (groupAliases.length > 0) {
+      const countQuery = qb.clone();
+      countQuery.skip(undefined).take(undefined);
+      countQuery.orderBy();
+
+      const total = (await countQuery.getRawMany()).length;
+      const items = await qb.getRawMany();
+
+      return {
+        data: items,
+        meta: {
+          page,
+          limit,
+          total,
+          total_pages: Math.ceil(total / limit),
+        },
+      };
+    }
 
     const [items, total] = await qb.getManyAndCount();
 
@@ -97,42 +120,169 @@ export class NoteAccessService {
     }
 
     if (filters.user_id !== undefined) {
-      console.log('Applying filters:', filters.user_id);
-
       qb.andWhere('note_access.userId = :userId', {
         userId: filters.user_id,
       });
     }
 
     if (filters.country?.length) {
-      qb.andWhere('country IN (:...countries)', {
+      qb.andWhere('note_access.country IN (:...countries)', {
         countries: filters.country,
       });
     }
 
     if (filters.device?.length) {
-      qb.andWhere('device IN (:...devices)', {
+      qb.andWhere('note_access.device IN (:...devices)', {
         devices: filters.device,
       });
     }
 
     if (filters.is_earn !== undefined) {
-      qb.andWhere('isEarn = :isEarn', {
+      qb.andWhere('note_access.isEarn = :isEarn', {
         isEarn: filters.is_earn,
       });
     }
 
     if (filters.reject_reason_mask !== undefined) {
-      qb.andWhere('rejectReasonMask = :rejectReasonMask', {
+      qb.andWhere('note_access.rejectReasonMask = :rejectReasonMask', {
         rejectReasonMask: filters.reject_reason_mask,
       });
     }
 
     if (filters.ip_address) {
-      qb.andWhere('ipAddress = :ipAddress', {
+      qb.andWhere('note_access.ipAddress = :ipAddress', {
         ipAddress: filters.ip_address,
       });
     }
+  }
+
+  private applySelects(
+    qb: SelectQueryBuilder<NoteAccessLogEntity>,
+    query: NoteAccessQueryDto,
+  ): void {
+    const selects = query.selects;
+
+    if (!selects || selects.length === 0) {
+      return;
+    }
+
+    const needsUserAgent = selects.some((field) => field.startsWith('user_agents.'));
+    if (needsUserAgent) {
+      qb.leftJoinAndSelect('note_access.userAgent', 'user_agent');
+    }
+
+    const selectMap: Record<string, string> = {
+      id: 'note_access.id',
+      link_id: 'note_access.linkId',
+      user_id: 'note_access.userId',
+      level_id: 'note_access.levelId',
+      ip_address: 'note_access.ipAddress',
+      agent_hash: 'note_access.agentHash',
+      country: 'note_access.country',
+      device: 'note_access.device',
+      revenue: 'note_access.revenue',
+      is_earn: 'note_access.isEarn',
+      detection_mask: 'note_access.detectionMask',
+      reject_reason_mask: 'note_access.rejectReasonMask',
+      created_at: 'note_access.createdAt',
+      'user_agents.hash': 'user_agent.hash',
+      'user_agents.raw': 'user_agent.raw',
+      'user_agents.browser': 'user_agent.browser',
+      'user_agents.os': 'user_agent.os',
+      'user_agents.device_type': 'user_agent.deviceType',
+    };
+
+    const columns = selects
+      .map((field) => selectMap[field])
+      .filter((column): column is string => Boolean(column));
+
+    if (columns.length === 0) {
+      return;
+    }
+
+    const sortMap: Record<string, string> = {
+      id: 'note_access.id',
+      revenue: 'note_access.revenue',
+      created_at: 'note_access.createdAt',
+    };
+
+    const sort = query.sort;
+    if (!sort || Object.keys(sort).length === 0) {
+      if (!columns.includes(sortMap.created_at)) {
+        columns.push(sortMap.created_at);
+      }
+    } else {
+      Object.keys(sort).forEach((field) => {
+        const orderColumn = sortMap[field];
+        if (orderColumn && !columns.includes(orderColumn)) {
+          columns.push(orderColumn);
+        }
+      });
+    }
+
+    if (!columns.includes('note_access.id')) {
+      columns.unshift('note_access.id');
+    }
+
+    qb.select(columns);
+  }
+
+  private applyGroup(
+    qb: SelectQueryBuilder<NoteAccessLogEntity>,
+    query: NoteAccessQueryDto,
+  ): string[] {
+    const groups = query.groups;
+
+    if (!groups || groups.length === 0) {
+      return [];
+    }
+
+    const groupMap: Record<string, { select: string; groupBy: string; alias: string }> = {
+      date: {
+        select: "DATE_FORMAT(note_access.createdAt, '%Y-%m-%d')",
+        groupBy: "DATE_FORMAT(note_access.createdAt, '%Y-%m-%d')",
+        alias: 'date',
+      },
+      level_id: {
+        select: 'note_access.levelId',
+        groupBy: 'note_access.levelId',
+        alias: 'level_id',
+      },
+      link_id: {
+        select: 'note_access.linkId',
+        groupBy: 'note_access.linkId',
+        alias: 'link_id',
+      },
+      user_id: {
+        select: 'note_access.userId',
+        groupBy: 'note_access.userId',
+        alias: 'user_id',
+      },
+    };
+
+    const groupFields = groups
+      .map((field) => groupMap[field])
+      .filter((field): field is { select: string; groupBy: string; alias: string } => Boolean(field));
+
+    if (groupFields.length === 0) {
+      return [];
+    }
+
+    const selectFields = groupFields.map((field) => `${field.select} AS ${field.alias}`);
+    qb.select(selectFields);
+    qb.addSelect('COUNT(*)', 'views');
+    qb.addSelect('COALESCE(SUM(note_access.revenue), 0)', 'revenue');
+
+    groupFields.forEach((field, index) => {
+      if (index === 0) {
+        qb.groupBy(field.groupBy);
+        return;
+      }
+
+      qb.addGroupBy(field.groupBy);
+    });
+
+    return groupFields.map((field) => field.alias);
   }
 
   private applyDateRange(
@@ -161,21 +311,47 @@ export class NoteAccessService {
   private applySorting(
     qb: SelectQueryBuilder<NoteAccessLogEntity>,
     query: NoteAccessQueryDto,
+    groupAliases: string[],
   ): void {
     const sort = query.sort;
 
-    const sortMap: Record<string, string> = {
-      id: 'note_access.id',
-      revenue: 'note_access.revenue',
-      created_at: 'note_access.createdAt',
-    };
+    const isGrouped = groupAliases.length > 0;
+    const sortMap: Record<string, string> = isGrouped
+      ? {
+          date: 'date',
+          level_id: 'level_id',
+          link_id: 'link_id',
+          user_id: 'user_id',
+          revenue: 'revenue',
+          views: 'views',
+        }
+      : {
+          id: 'note_access.id',
+          revenue: 'note_access.revenue',
+          created_at: 'note_access.createdAt',
+        };
 
     if (!sort || Object.keys(sort).length === 0) {
+      if (isGrouped) {
+        const defaultField = groupAliases[0];
+        if (defaultField) {
+          const direction = defaultField === 'date' ? 'DESC' : 'ASC';
+          qb.orderBy(defaultField, direction);
+          return;
+        }
+      }
+
       qb.orderBy('note_access.createdAt', 'DESC');
       return;
     }
 
-    Object.entries(sort).forEach(([field, direction], index) => {
+    let sortIndex = 0;
+
+    Object.entries(sort).forEach(([field, direction]) => {
+      if (direction === undefined || direction === null || direction === '') {
+        return;
+      }
+
       const column = sortMap[field];
 
       if (!column) {
@@ -188,13 +364,26 @@ export class NoteAccessService {
         throw new BadRequestException(`Invalid sort direction: ${direction}`);
       }
 
-      if (index === 0) {
+      if (sortIndex === 0) {
         qb.orderBy(column, order as 'ASC' | 'DESC');
-        return;
+      } else {
+        qb.addOrderBy(column, order as 'ASC' | 'DESC');
+      }
+      sortIndex += 1;
+    });
+
+    if (sortIndex === 0) {
+      if (isGrouped) {
+        const defaultField = groupAliases[0];
+        if (defaultField) {
+          const direction = defaultField === 'date' ? 'DESC' : 'ASC';
+          qb.orderBy(defaultField, direction);
+          return;
+        }
       }
 
-      qb.addOrderBy(column, order as 'ASC' | 'DESC');
-    });
+      qb.orderBy('note_access.createdAt', 'DESC');
+    }
   }
 
   async getLinkByAlias(alias: string, country?: string): Promise<LinkData | null> {

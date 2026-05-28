@@ -18,6 +18,7 @@ export class NoteQueryController {
   @Get('query')
   @HttpCode(HttpStatus.OK)
   async queryByParams(@Query() query: NoteAccessQueryDto) {
+    console.log('Querying note access logs with filters:', query);
     // this.assertAuthorized(request);
     return { success: true, ...await this.NoteAccessService.findAll(query) };
   }

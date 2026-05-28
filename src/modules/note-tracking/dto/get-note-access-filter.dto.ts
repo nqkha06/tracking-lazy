@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsIn,
   IsInt,
   IsObject,
@@ -33,6 +34,19 @@ const toStringArray = ({ value }: { value: unknown }): string[] | undefined => {
   return rawValue
     .split(',')
     .map((item) => item.trim().toUpperCase())
+    .filter(Boolean);
+};
+
+const toFieldArray = ({ value }: { value: unknown }): string[] | undefined => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  const rawValue = Array.isArray(value) ? value.join(',') : String(value);
+
+  return rawValue
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
 };
 
@@ -87,7 +101,27 @@ export class NoteAccessSortDto {
 
   @IsOptional()
   @IsIn(['ASC', 'DESC', 'asc', 'desc'])
+  date?: 'ASC' | 'DESC' | 'asc' | 'desc';
+
+  @IsOptional()
+  @IsIn(['ASC', 'DESC', 'asc', 'desc'])
   revenue?: 'ASC' | 'DESC' | 'asc' | 'desc';
+
+  @IsOptional()
+  @IsIn(['ASC', 'DESC', 'asc', 'desc'])
+  views?: 'ASC' | 'DESC' | 'asc' | 'desc';
+
+  @IsOptional()
+  @IsIn(['ASC', 'DESC', 'asc', 'desc'])
+  link_id?: 'ASC' | 'DESC' | 'asc' | 'desc';
+
+  @IsOptional()
+  @IsIn(['ASC', 'DESC', 'asc', 'desc'])
+  user_id?: 'ASC' | 'DESC' | 'asc' | 'desc';
+
+  @IsOptional()
+  @IsIn(['ASC', 'DESC', 'asc', 'desc'])
+  level_id?: 'ASC' | 'DESC' | 'asc' | 'desc';
 
   @IsOptional()
   @IsIn(['ASC', 'DESC', 'asc', 'desc'])
@@ -95,6 +129,42 @@ export class NoteAccessSortDto {
 }
 
 export class NoteAccessQueryDto {
+  @IsOptional()
+  @Transform(toFieldArray)
+  @IsArray()
+  @IsString({ each: true })
+  @IsIn(
+    [
+      'id',
+      'link_id',
+      'user_id',
+      'level_id',
+      'ip_address',
+      'agent_hash',
+      'country',
+      'device',
+      'revenue',
+      'is_earn',
+      'detection_mask',
+      'reject_reason_mask',
+      'created_at',
+      'user_agents.hash',
+      'user_agents.raw',
+      'user_agents.browser',
+      'user_agents.os',
+      'user_agents.device_type',
+    ],
+    { each: true },
+  )
+  selects?: string[];
+
+  @IsOptional()
+  @Transform(toFieldArray)
+  @IsArray()
+  @IsString({ each: true })
+  @IsIn(['date', 'level_id', 'link_id', 'user_id'], { each: true })
+  groups?: string[];
+
   @IsOptional()
   @IsObject()
   @ValidateNested()

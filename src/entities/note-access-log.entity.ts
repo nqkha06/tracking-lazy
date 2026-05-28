@@ -1,9 +1,11 @@
-import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { UserAgentEntity } from './user-agent.entity';
 
 @Entity({ name: 'note_access_logs' })
 @Index('idx_link_created_at', ['linkId', 'createdAt'])
 @Index('idx_user_created_at', ['userId', 'createdAt'])
 @Index('idx_ip_created_at', ['ipAddress', 'createdAt'])
+
 export class NoteAccessLogEntity {
   @PrimaryGeneratedColumn({ type: 'bigint', unsigned: true })
   id!: string;
@@ -14,11 +16,18 @@ export class NoteAccessLogEntity {
   @Column({ name: 'user_id', type: 'int', unsigned: true })
   userId!: number;
 
+  @Column({ name: 'level_id', type: 'int', unsigned: true })
+  levelId!: number;
+
   @Column({ name: 'ip_address', type: 'varchar', length: 45 })
   ipAddress!: string;
 
   @Column({ name: 'agent_hash', type: 'char', length: 32 })
   agentHash!: string;
+
+  @ManyToOne(() => UserAgentEntity, { nullable: true })
+  @JoinColumn({ name: 'agent_hash', referencedColumnName: 'hash' })
+  userAgent?: UserAgentEntity | null;
 
   @Column({ name: 'country', type: 'varchar', length: 10, default: 'UNK' })
   country!: string;

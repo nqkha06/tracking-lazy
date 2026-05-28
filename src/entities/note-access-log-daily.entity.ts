@@ -12,6 +12,9 @@ export class NoteAccessLogDailyEntity {
 
   @Column({ name: 'user_id', type: 'int', unsigned: true })
   userId!: number;
+  
+  @Column({ name: 'level_id', type: 'int', unsigned: true })
+  levelId!: number;
 
   @Column({ name: 'ip_address', type: 'varchar', length: 45 })
   ipAddress!: string;
