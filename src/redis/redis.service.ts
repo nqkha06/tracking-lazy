@@ -7,6 +7,8 @@ export class RedisService implements OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   private readonly client: Redis;
 
+  public redis: Redis;
+
   constructor(private readonly configService: ConfigService) {
     this.client = new Redis({
       host: this.configService.get<string>('REDIS_HOST', '127.0.0.1'),
@@ -21,6 +23,7 @@ export class RedisService implements OnModuleDestroy {
     this.client.on('error', (error: Error) => {
       this.logger.error(`Redis error: ${error.message}`);
     });
+    this.redis = this.client;
   }
 
   async onModuleDestroy(): Promise<void> {

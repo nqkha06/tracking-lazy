@@ -103,6 +103,14 @@ export class NoteAccessService {
     };
   }
 
+  async createAsync(data: Omit<NoteAccessLogEntity, 'id' | 'createdAt'>): Promise<Boolean> {
+    await this.redisService.redis.lpush(
+      'note_access_logs',
+      JSON.stringify(data),
+    );
+
+    return true;
+  }
   private applyFilters(
     qb: SelectQueryBuilder<NoteAccessLogEntity>,
     query: NoteAccessQueryDto,
@@ -257,6 +265,12 @@ export class NoteAccessService {
         select: 'note_access.userId',
         groupBy: 'note_access.userId',
         alias: 'user_id',
+      },
+
+      country: {
+        select: 'note_access.country',
+        groupBy: 'note_access.country',
+        alias: 'country',
       },
     };
 

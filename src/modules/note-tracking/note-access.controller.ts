@@ -24,17 +24,24 @@ export class NoteAccessController {
   @Get(':alias')
   @HttpCode(HttpStatus.OK)
   async trackGet(@Param('alias') alias: string, @Req() request: Request){
-    return 123;
-
     const xxIpAddress = this.extractClientIp(request);
     const xxUa = request.header('xx-ua') || '';
 
-    const body: TrackRequestDto = {
+    const payload = {
+      linkId: 1,
+      userId: 1,
+      levelId: 1,
+      ipAddress: xxIpAddress,
+      agentHash: xxUa,
       country: this.getCountryFromHeader(request),
-      adBlock: false,
-      proxyVpn: false,
-      ipChange: false,
+      device: 1,
+      revenue: '0.00',
+      isEarn: 0,
+      detectionMask: 0,
+      rejectReasonMask: 0,
     };
+    
+    return this.trackingService.createAsync(payload);
   }
 
   private extractClientIp(request: Request): string {

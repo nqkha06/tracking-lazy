@@ -162,7 +162,7 @@ export class NoteAccessQueryDto {
   @Transform(toFieldArray)
   @IsArray()
   @IsString({ each: true })
-  @IsIn(['date', 'level_id', 'link_id', 'user_id'], { each: true })
+  @IsIn(['date', 'level_id', 'link_id', 'user_id', 'country'], { each: true })
   groups?: string[];
 
   @IsOptional()

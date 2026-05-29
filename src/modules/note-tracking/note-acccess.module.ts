@@ -9,12 +9,13 @@ import { NoteQueryController } from './note-query.controller';
 import { TrackingStatsService } from './tracking-stats.service';
 import { NoteAccessService } from './note-access.service';
 import { TrackingWorker } from './tracking.worker';
+import { NoteAccessLogWorker } from './note-access-log.worker';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([UserAgentEntity, NoteAccessLogEntity, NoteAccessLogDailyEntity]),
   ],
   controllers: [NoteAccessController, NoteQueryController],
-  providers: [NoteAccessService, TrackingStatsService, TrackingRepository, TrackingWorker],
+  providers: [NoteAccessService, TrackingStatsService, TrackingRepository, NoteAccessLogWorker],
 })
 export class NoteAccessModule {}
