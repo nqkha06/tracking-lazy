@@ -58,6 +58,10 @@ export class NoteAccessLogEntity {
   })
   rejectReasonMask!: number;
 
-  @Column({ name: 'created_at', type: 'datetime' })
-  createdAt!: Date;
+  @Column({
+    name: 'created_at',
+    type: 'timestamp',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
+  createdAt: Date;
 }

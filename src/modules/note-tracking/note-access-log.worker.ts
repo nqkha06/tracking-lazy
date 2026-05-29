@@ -13,10 +13,10 @@ export class NoteAccessLogWorker {
     private readonly noteAcc: Repository<NoteAccessLogEntity>,
   ) {}
 
-  @Cron('*/5 * * * * *')
+  @Cron('*/30 * * * * *')
   async flushLogs(): Promise<void> {
     const pipeline = this.redisService.createPipeline();
-    const batchSize = 1000;
+    const batchSize = 1;
 
     for (let i = 0; i < batchSize; i++) {
       pipeline.rpop('note_access_logs');

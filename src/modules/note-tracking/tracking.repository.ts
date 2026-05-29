@@ -280,6 +280,7 @@ export class TrackingRepository {
         os: detectOs(raw),
         deviceType,
       })
+      .updateEntity(false)
       .orIgnore()
       .execute();
   }

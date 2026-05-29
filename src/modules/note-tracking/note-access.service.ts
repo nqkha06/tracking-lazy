@@ -2,10 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '../../http/http.service';
 import { RedisService } from '../../redis/redis.service';
+import { DEVICE_CODE, detectDevice, sanitizeUserAgent } from '../../utils/device.util';
 import {
   sanitizeAlias,
   sanitizeCountry,
 } from '../../utils/detection.util';
+import { md5 } from '../../utils/hash.util';
 import {
   LinkData,
   LinkRateConfig,
@@ -17,6 +19,7 @@ import { NoteAccessLogEntity } from 'src/entities/note-access-log.entity';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { NoteAccessQueryDto } from './dto/get-note-access-filter.dto';
+import { TrackingRepository } from './tracking.repository';
 
 import { BadRequestException } from '@nestjs/common';
 import { SelectQueryBuilder } from 'typeorm';
@@ -36,6 +39,7 @@ export class NoteAccessService {
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
     private readonly redisService: RedisService,
+    private readonly trackingRepository: TrackingRepository,
   ) {
     this.detailLinkEndpoint = (
       this.configService.get<string>('DETAIL_LINK_ENDPOINT', '') || ''
@@ -103,10 +107,43 @@ export class NoteAccessService {
     };
   }
 
-  async createAsync(data: Omit<NoteAccessLogEntity, 'id' | 'createdAt'>): Promise<Boolean> {
+  async createAsync(
+    data: Omit<NoteAccessLogEntity, 'id'>,
+    rawUserAgent: string,
+  ): Promise<boolean> {
+    const sanitizedUserAgent = sanitizeUserAgent(rawUserAgent || '');
+    const agentHash = md5(sanitizedUserAgent || 'unknown');
+    const device = detectDevice(sanitizedUserAgent);
+    const deviceCode = DEVICE_CODE[device];
+
+    await this.trackingRepository.ensureUserAgent(
+      agentHash,
+      sanitizedUserAgent || 'unknown',
+      deviceCode,
+    );
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const accessKey = `note_access:${data.ipAddress}:${data.userId}:${today}`;
+
+    const isFirstAccess = await this.redisService.redis.set(
+      accessKey,
+      '1',
+      'EX',
+      86400, // 1 ngày
+      'NX',
+    );
+
+    // đã access trước đó
+    if (!isFirstAccess) {
+      data.revenue = '0';
+      data.isEarn = 0;
+    } else {
+      data.isEarn = 1;
+    }
     await this.redisService.redis.lpush(
       'note_access_logs',
-      JSON.stringify(data),
+      JSON.stringify({ ...data, agentHash }),
     );
 
     return true;
