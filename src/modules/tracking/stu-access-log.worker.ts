@@ -3,14 +3,14 @@ import { Cron } from '@nestjs/schedule';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { RedisService } from '../../redis/redis.service';
-import { NoteAccessLogEntity } from '../../entities/note-access-log.entity';
+import { AccessLogEntity } from '../../entities/access-log.entity';
 
 @Injectable()
 export class NoteAccessLogWorker {
   constructor(
     private readonly redisService: RedisService,
-    @InjectRepository(NoteAccessLogEntity)
-    private readonly noteAcc: Repository<NoteAccessLogEntity>,
+    @InjectRepository(AccessLogEntity)
+    private readonly accessLogRepository: Repository<AccessLogEntity>,
     @InjectDataSource('application')
     private readonly appDataSource: DataSource,
   ) {}
@@ -21,7 +21,7 @@ export class NoteAccessLogWorker {
     const batchSize = 1000;
 
     for (let i = 0; i < batchSize; i++) {
-      pipeline.rpop('note_access_logs');
+      pipeline.rpop('logs_queue');
     }
 
     const results = await pipeline.exec();
@@ -34,7 +34,7 @@ export class NoteAccessLogWorker {
       return;
     }
 
-    await this.noteAcc.insert(logs);
+    await this.accessLogRepository.insert(logs);
     await this.incrementUserBalances(logs);
     await this.incrementLinkStats(logs);
   }
